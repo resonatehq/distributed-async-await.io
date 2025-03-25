@@ -1,0 +1,5 @@
+.navbar__search-input {
+    padding-left: 2rem;
+    color: var(--ifm-font-color-base);
+    text-align: left;
+}

@@ -1,0 +1,10 @@
+{
+  "label": "Specification",
+  "position": 2,
+  "collapsed": true,
+  "collapsible": true,
+  "link": {
+    "type": "doc",
+    "id": "specification/index"
+  }
+}

@@ -1,0 +1,75 @@
+---
+id: call-graphs
+title: Call Graphs
+sidebar_label: Call Graphs
+description: Call Graphs are an effective means by which to communicate the structure of a distributed application.
+last_update:
+  date: "03-21-2024"
+tags:
+  - concepts
+  - call-graph
+---
+
+The Distributed Async Await specification, and all implementations of it, ask you, the software developer, to think about distributed applications in the context of Call Graphs.
+
+Generically, a Call Graph is a directed graph where the nodes are functions and the edges are calls between functions.
+
+Within the context of the Distributed Async Await specification, and all implementations of it, a Call Graph is the full set of promises and function executions from ephemeral edge to ephemeral edge.
+That is — a Call Graph is a map of the durable world.
+
+The Distributed Async Await specification makes the case the that the Call Graph is an effective means by which to communicate the structure of a distributed application.
+
+To illustrate this, consider a single function execution.
+In the Distributed Async Await specification, all function invocations pair with a promise.
+
+![Single function execution and promise pair](/img/simple-call-graph.svg)
+
+The gray area around the function execution and promise is the unit of locality, i.e the process in which the function is executed.
+
+Each promise has a unique ID and maps to the invocation of a function.
+
+However, Call Graph diagrams can zoom in and out.
+
+Within the Distributed Async Await specification, a Call Graph can just show function executions and ignore the promises.
+
+Consider the following pseudo-code, where `foo()`, `bar()`, and `baz()` are all in the same process, and invoked as such:
+
+```
+def foo():
+    p1 = bar()
+    p2 = baz()
+    return
+
+def bar():
+    return
+
+def baz():
+    return
+```
+
+The Concurrent Call Graph would look like this:
+
+When a function calls another function within the same Application Node, it is considered a Local Function Invocation (LFI).
+
+{/* ![Diagram of an LFI Call Graph](/img/lfc-call-graph.svg) */}
+
+When a function calls another function in a different Application Node, it is considered a Remote Function Invocation (RFI).
+
+{/* ![Diagram of an RFI Call Graph](/img/rfc-call-graph.svg) */}
+
+A Resonate Application can make use of both LFIs and RFIs, and thus a Resoante Call Graph can span just one or many Application Nodes.
+
+{/* ![Diagram of a Resonate Call Graph spanning multiple Application Nodes](/img/complex-rfc-call-graph.svg) */}
+
+## Root promises
+
+There are two types of root promises.
+The first is the root promise of an Application Node (process), and the second is the root promise of a Call Graph.
+
+An Application Node root promise (also known as the process) is the promise associated with the first execution in an Application Node.
+In other words, this is the execution invoked by `resonate.run()`.
+
+A Call Graph root promise is the promise associated with the first execution in a Call Graph.
+This execution is also invoked by `resonate.run()`, but it is on the "edge" and is typically the entry point into the application.
+
+{/* ![Diagram of a Resonate Call Graph with labeled root promises](/img/labeled-complex-rfc-call-graph.svg) */}

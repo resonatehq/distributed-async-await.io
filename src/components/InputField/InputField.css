@@ -1,0 +1,22 @@
+.input-container {
+  width: 100%;
+  padding: 20px;
+  box-sizing: border-box;
+}
+
+.full-width-input {
+  width: 100%;
+  padding: 15px 20px;
+  font-size: 18px;
+  border: 2px solid #b0b8c3;
+  border-radius: 0px;
+  background-color: #f8f9fa;
+  color: #353f58;
+  transition: all 0.3s ease;
+  cursor: pointer;
+}
+
+.full-width-input:hover {
+  background-color: #ffffff;
+  border-color: #88a7f6;
+}

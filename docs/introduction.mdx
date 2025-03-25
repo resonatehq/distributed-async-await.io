@@ -1,0 +1,28 @@
+---
+id: index
+slug: /
+title: Distributed Async Await specification
+description: Distributed Async Await specification
+sidebar_label: Introduction
+sidebar_position: 1
+last_update:
+  date: "03-21-2025"
+---
+
+**Welcome to the Distributed Async Await specification.**
+
+Today, every application is **a concurrent and distributed application**.
+The question is no longer _if_ an application is concurrent and distributed, _but to what extent_.
+Concurrency and distribution are now fundamental to software engineering.
+
+Yet, they (concurrency and distribution) are still largely handled at the application level.
+Modern attempts to move them into the platform layer often introduce even more complexity.
+This complexity degrades a developer's experience, which is tied to the quality of their output.
+
+This specification formalizes **Distributed Async Await** — an open, vendor-neutral programming model designed to extend mainstream languages with native support for concurrency and distribution, without adding complexity or obscuring control.
+The model builds on generic `async/await` semantics and an underlying **asynchronous remote procedure call** mechanism.
+
+Beyond just mechanics, this specification introduces a **way of thinking** about distributed systems — that is, this specification introduces a specific system model that sets the foundation on which the specification is built.
+
+Distributed Async Await is not bound to any specific language or runtime.
+It is intended to be **implemented broadly**, across ecosystems, to support a unified approach to building resilient, transparent distributed systems.
