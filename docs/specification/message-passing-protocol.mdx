@@ -4,45 +4,52 @@ title: Message Passing Protocol
 sidebar_label: Message Passing Protocol
 ---
 
-The Distributed Async Await protocol set is based on low-level message-passing semantics.
-X.0 Objective
-The Message-Passing Protocol MUST support a wide array of transport mechanisms such as push or poll over http or message queues. Therefore, the specification defines the behavior of sending and receiving messages between processes with minimal requirements and minimal guarantees.
-X.1 Messaging
+The Distributed Async Await specification relies on low-level message-passing semantics.
+
+The Message-Passing Protocol MUST support a wide array of transport mechanisms such as push or poll over http or message queues.
+Therefore, the specification defines the behavior of sending and receiving messages between processes with minimal requirements and minimal guarantees.
+
+## Messaging
+
 Every component may issue a Send(address, message) command that will result in emitting a Send(address, message) event.
 
-```shell
+```text
 command Send<T>(address : Address, message : T)
 ```
 
-X.2 Addressing
+The Send command is the foundation of Distributed Async Await’s failover mechanics: Send’s AnyCast semantics enables both routing as well as transparent rerouting in case of failure.
+This ensures that distributed executions can adapt dynamically to changes in the process topology automatically.
+
+Invoke-Resume Example: The Canonical Interaction
+
+The canonical interaction in Distributed Async Await involves invoking and awaiting an asynchronous function remotely (see [Distributed Coordination Protocol](/specification/distributed-coordination-protocol)).
+This interaction involves two messages:
+
+**Invoke**
+
+_invoke_ represents the request to invoke an execution.
+
+**Resume**
+
+_resume_ represents the request to resume an awaiting execution.
+
+## Addressing
+
 Processes communicate via addresses. Distributed Async Await supports two types of addresses, UniCast addresses and AnyCast addresses.
 
 UniCast. A UniCast address denotes an individual process.
 AnyCast. An AnyCast address denotes a group of processes.
 
-```
+```text
 data Address =
   | UniCast PSpecifier
   | AnyCast GSpecifier x optional<PSpecifier>
 ```
 
-PSpecifier denotes a transport-specific specifier specifying a single progress
+- PSpecifier denotes a transport-specific specifier specifying a single progress.
+- GSpecifier denotes a transport-specific specifier specifying a group of processes.
 
-GSpecifier denotes a transport-specific specifier specifying a group of processes
+### Address Resolution
 
-X.3 Address Resolution
-This specification does not determine how and when addresses are resolved. Specifically, this specification does not determine whether addresses are resolved on send (early binding) or on recv (late binding).
-
-X.4 Send as a Foundations of Failover
-The Send command is the foundation of Distributed Async Await’s failover mechanics: Send’s AnyCast semantics enables both routing as well as transparent rerouting in case of failure. This ensures that distributed executions can adapt dynamically to changes in the process topology automatically.
-Invoke-Resume Example: The Canonical Interaction
-
-The canonical interaction in Distributed Async Await involves invoking and awaiting an asynchronous function remotely (see Distributed Coordination Protocol). This interaction involves two messages:
-
-Invoke
-Represents the request to invoke an execution
-
-Resume
-Represents the request to resume an awaiting execution
-
-The following example illustrates how Send’s AnyCast semantics enable reliable failover in a distributed system.
+This specification does not determine how and when addresses are resolved.
+Specifically, this specification does not determine whether addresses are resolved on send (early binding) or on recv (late binding).
