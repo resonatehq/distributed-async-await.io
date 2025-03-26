@@ -48,7 +48,7 @@ article {
 
 article a {
   text-decoration: underline;
-  color: #63e6be;
+  color: #3cc9a7;
   font-weight: 400;
 }
 
@@ -84,12 +84,12 @@ article a {
 }
 
 .menu__link:hover {
-  color: #63e6be !important;
+  color: #3cc9a7 !important;
 }
 
 .menu__link--active,
 .table-of-contents__link--active {
-  color: #63e6be !important;
+  color: #3cc9a7 !important;
 }
 
 .menu__caret {
@@ -113,7 +113,7 @@ article a {
 }
 
 .navbar__link:hover {
-  color: #63e6be !important;
+  color: #3cc9a7 !important;
 }
 
 .navbar__link i,
@@ -156,7 +156,7 @@ article a {
 }
 
 pagination-nav__link:hover {
-  border-color: #63e6be !important;
+  border-color: #3cc9a7 !important;
 }
 
 .card {
@@ -170,7 +170,7 @@ pagination-nav__link:hover {
 }
 
 .card:hover {
-  border-color: #63e6be !important;
+  border-color: #3cc9a7 !important;
 }
 
 .navbar__search-input {
