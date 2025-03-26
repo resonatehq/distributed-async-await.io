@@ -1,0 +1,48 @@
+---
+id: system-model
+title: System Model
+sidebar_label: System Model
+sidebar_position: 1
+---
+
+## Distributed System
+
+A distributed system is a collection of concurrent components ([processes](/system-model/processes)) that communicate by exchanging messages over the network.
+Each component has exclusive access to its local state as well as its local channel to the network－In other words, components do not share state and cannot directly observe each other.
+
+![Distributed System diagram](/img/distributed-system.svg)
+
+The behavior of a distributed system emerges from the behavior of its process.
+The behavior of a process is represented by its trace, a totally ordered sequence of events, such as sending or receiving a message.
+
+Within a process, events are totally ordered.
+However, across processes, events are only partially ordered.
+We will reason about a system from a global point of view, but that is an idealized view that is not available to any one process
+
+## Processes
+
+On a process level, a system is a collection of processes, each process has a unique identity.
+A process has a well-defined lifecycle, represented by the lifecycle events _init_ and _term_, that governs its participation in the system:
+
+**_init_** marks the initialization of the process and represents its entry into the system.
+
+**_term_** marks the termination of the process and represents its exit from the system.
+
+A process cannot emit events outside its (_init_, _term_) interval.
+As a consequence, a process cannot announce its termination after its termination.
+Instead, if desired, the process must announce its intent to terminate.
+In the case of failure, the process fails silently.
+
+![Process lifecycle diagram](/img/process-lifecycle.svg)
+
+A process cannot be restarted.
+Instead, a new process must be created that may be considered the logical successor or the logical equivalent of the terminated process.
+
+A _term_ event may denote both a normal planned termination, or an abnormal unplanned termination ([fail-stop](/system-model/failure)).
+
+Physical Processes are the atomic units of locality.
+This specification does not include a notion of physical nodes.
+
+## Failure
+
+Distributed Async Await assumes a fail-stop, also called crash-stop, failure model for processes: When a process experiences a failure, the process stops performing any internal or external steps at an arbitrary moment in time and never again performs any further internal or external steps.
