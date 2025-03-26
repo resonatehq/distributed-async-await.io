@@ -1,0 +1,13 @@
+---
+id: programming-model
+title: Programming Model
+sidebar_label: Programming Model
+---
+
+Distributed Async Await, like _async/await_, builds on two abstractions, functions and promises.
+Functions are a universal abstraction for computation, promises are a universal abstraction for coordination.
+
+Functions compose recursively, that is, a function may call other functions spanning a [Call Graph](/system-model/call-graphs).
+The Call Graph provides a flexible lens onto a computation.
+The call graph is zoomable, allowing one to expand a caller into its callees, treating a function as a composite, or collapse those callees into the caller, treating the function as atomic.
+This flexibility enables reasoning at different levels of abstraction.

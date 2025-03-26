@@ -1,10 +1,10 @@
 {
-  "label": "Specification",
-  "position": 3,
+  "label": "Ethos",
+  "position": 5,
   "collapsed": true,
   "collapsible": true,
   "link": {
     "type": "doc",
-    "id": "specification/index"
+    "id": "ethos/index"
   }
 }
