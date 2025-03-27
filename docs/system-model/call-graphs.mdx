@@ -10,46 +10,69 @@ tags:
   - call-graph
 ---
 
-The Distributed Async Await specification, and all implementations of it, ask you, the software developer, to think about distributed applications in the context of Call Graphs.
+import { LabeledDiagram } from "@site/src/components/LabeledDiagram/LabeledDiagram";
 
 Generically, a Call Graph is a directed graph where the nodes are functions and the edges are calls between functions.
 
-Within the context of the Distributed Async Await specification, and all implementations of it, a Call Graph is the full set of promises and function executions from ephemeral edge to ephemeral edge.
+<LabeledDiagram>
+  <img src="/img/generic-call-graph.svg" alt="Generic Call Graph" />
+</LabeledDiagram>
+
+Within the context of the Distributed Async Await specification, and all implementations of it, a Call Graph is the full set of promises and executions from ephemeral edge to ephemeral edge.
 That is — a Call Graph is a map of the durable world.
 
-The Distributed Async Await specification makes the case the that the Call Graph is an effective means by which to communicate the structure of a distributed application.
+In the Distributed Async Await specification, all execution invocations pair with a promise.
 
-To illustrate this, consider a single function execution.
-In the Distributed Async Await specification, all function invocations pair with a promise.
+<LabeledDiagram>
+  <img src="/img/promise-execution-pair.svg" alt="Promise execution pair" />
+</LabeledDiagram>
 
-![Single function execution and promise pair](/img/simple-call-graph.svg)
+An execution can be either a function execution or some action that must be taken outside of the system, such as a human clicking a button.
 
-The gray area around the function execution and promise is the unit of locality, i.e the process in which the function is executed.
+![Promise execution promise action pairs](/img/promise-execution-promise-action-pairs.svg)
 
-Each promise has a unique ID and maps to the invocation of a function.
+A Call Graph can illustrate locality — that is, an execution can display its locality in relation to other executions.
+This is called a Distributed Call Graph.
 
-However, Call Graph diagrams can zoom in and out.
+![Execution locality](/img/execution-locality.svg)
 
-Within the Distributed Async Await specification, a Call Graph can just show function executions and ignore the promises.
+A Call Graph is zoomable — that is, it can show the full set of promises and executions, or it can show just the root executions.
+Consider the following pseudo-code, where `foo()` and `bar()` are in process a, and `baz()` is in process b.
 
-Consider the following pseudo-code, where `foo()`, `bar()`, and `baz()` are all in the same process, and invoked as such:
+process a:
 
+```text
+func foo():
+    r = await (async_local bar())
+    return r
+
+func bar():
+    r = await (async_remote baz())
+    return r
 ```
-def foo():
-    p1 = bar()
-    p2 = baz()
-    return
 
-def bar():
-    return
+process b:
 
-def baz():
-    return
+```text
+func baz():
+    return 1
 ```
 
-The Concurrent Call Graph would look like this:
+If the Call Graph zooms in on all the promises, function executions, and localities (details, concurrency, and distribution), it would look like this:
 
-When a function calls another function within the same Application Node, it is considered a Local Function Invocation (LFI).
+![Detailed distributed concurrent Call Graph](/img/detailed-distributed-concurrent-call-graph.svg)
+
+This same call structure can assume promises and the Call Graph can just show the function executions.
+
+![Detailed distributed concurrent Call Graph](/img/distributed-concurrent-call-graph.svg)
+
+To show just the distributed nature of the application, we can zoom out and show just the root executions of each process.
+
+![Distributed Call Graph](/img/distributed-call-graph.svg)
+
+## Local and Remote
+
+When a function calls another function within the same process it is called a Local Function Invocation (LFI).
 
 {/* ![Diagram of an LFI Call Graph](/img/lfc-call-graph.svg) */}
 

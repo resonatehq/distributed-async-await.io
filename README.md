@@ -1,6 +1,14 @@
 # Distributed Async Await specification
 
-This website is built using [Docusaurus 2](https://docusaurus.io/), a modern static website generator.
+This repository serves as the source of truth for the Distributed Async Await specification.
+
+It serves the specification to distributed-async-await.io
+
+The website uses [Docusaurus 2](https://docusaurus.io/), a modern static website generator.
+
+## Local development
+
+The following steps will serve the website locally and run a production build check.
 
 Install dependencies:
 
