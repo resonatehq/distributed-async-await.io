@@ -5,12 +5,19 @@ sidebar_label: System Model
 sidebar_position: 1
 ---
 
+import { LabeledDiagram } from "@site/src/components/LabeledDiagram/LabeledDiagram";
+
+This System Model introduces a **way of thinking** about distributed systems that is foundational to the Distributed Async Await specification.
+It defines the rules that govern the behavior of distributed software systems.
+
 ## Distributed System
 
 A distributed system is a collection of concurrent components ([processes](/system-model/processes)) that communicate by exchanging messages over the network.
 Each component has exclusive access to its local state as well as its local channel to the network－In other words, components do not share state and cannot directly observe each other.
 
-![Distributed System diagram](/img/distributed-system.svg)
+<LabeledDiagram>
+  <img src="/img/distributed-system.svg" alt="Distributed System diagram" />
+</LabeledDiagram>
 
 The behavior of a distributed system emerges from the behavior of its process.
 The behavior of a process is represented by its trace, a totally ordered sequence of events, such as sending or receiving a message.
@@ -33,7 +40,9 @@ As a consequence, a process cannot announce its termination after its terminatio
 Instead, if desired, the process must announce its intent to terminate.
 In the case of failure, the process fails silently.
 
-![Process lifecycle diagram](/img/process-lifecycle.svg)
+<LabeledDiagram>
+  <img src="/img/process-lifecycle.svg" alt="Process lifecycle diagram" />
+</LabeledDiagram>
 
 A process cannot be restarted.
 Instead, a new process must be created that may be considered the logical successor or the logical equivalent of the terminated process.
@@ -43,6 +52,59 @@ A _term_ event may denote both a normal planned termination, or an abnormal unpl
 Physical Processes are the atomic units of locality.
 This specification does not include a notion of physical nodes.
 
+## Executions
+
+On an execution level, a system is a collection of executions, each execution has a unique identity.
+An execution has a well-defined lifecycle, represented by the lifecycle events _invoke_ and _return_, that governs its participation in the system:
+
+**_invoke_** marks the initialization of the execution and represents its entry into the system.
+
+**_return_** marks the termination of the execution and represents its exit from the system.
+
+An execution is bound to a single process.
+An execution cannot emit events outside its (_invoke_, _return_) interval.
+As a consequence, an execution cannot be restarted.
+Instead, a new execution must be created that may be considered the logical successor or the logical equivalent of the terminated execution.
+
+<LabeledDiagram>
+  <img src="/img/execution-lifecycle.svg" alt="Execution lifecycle diagram" />
+</LabeledDiagram>
+
+An execution has a well-defined lifecycle, represented by the lifecycle events _invoke_ and _return_, that governs its participation in the system.
+An execution may raise events such as send or receive events only within its (invoke, return).
+
 ## Failure
 
 Distributed Async Await assumes a fail-stop, also called crash-stop, failure model for processes: When a process experiences a failure, the process stops performing any internal or external steps at an arbitrary moment in time and never again performs any further internal or external steps.
+
+This specification assumes a fail-stop, also called crash-stop, failure model for processes: When a process experiences a failure, the process stops performing any internal or external steps at an arbitrary moment in time and never again performs any further internal or external steps.
+Note
+This specification does not make statements about process creation. Specifically, when processes leave the system (e.g. in the event of failures), an external mechanism is responsible to add new processes if necessary.
+
+Distributed Async Await assumes a fail-stop process failure model: A process may non-deterministically terminate. Specifically, upon termination, the process does not raise additional events and therefore cannot announce its termination.
+
+In case of a failure, that is, an unexpected and unwanted termination event, a process is considered crashed. The process cannot be restarted. Instead, a new process must be created that may be considered the logical successor or the logical equivalent of the terminated process.
+
+The notion of logical successor or logical equivalent introduces two distinct levels of reasoning: The logical layer and the physical layer.
+
+Logical Layer
+The logical layer is populated by logical processes. A logical process has a logical id. A logical process is composed of one or more physical processes.
+
+Physical Layer
+The physical layer is populated by logical processes. A physical process has a physical id. One or more physical processes are composed into one logical process.
+
+A logical process can experience additional lifetime events, suspension and resumption: When a physical process terminates, the associated logical process suspends (commonly referred to as a crash). When another physical process initiates, the associated logical process resumes (commonly referred to as restart or recovery.
+
+## Messaging
+
+Messages are sent between processes; consequently, messages are addressed to processes. One (successful) message exchange consists of a send event at the sending process and a receive event at the receiving process.
+
+<LabeledDiagram>
+  <img src="/img/send-receive-event.svg" alt="Send and Receive event diagram" />
+</LabeledDiagram>
+
+The most fine granular model of message exchange between two processes consists of 4 events, a send event at the sending process, a receive event at the network followed by a send event at the network and a receive event at the receiving process. At this level of abstraction, message exchange between processes and the network is reliable, however, the network may reorder, drop, or duplicate messages
+
+The more common model of message exchange between two processes consists of two events, a send event at the sending process and a receive event at the receiving process. At this level of abstraction, message exchange between processes is unreliable, messages may be reordered, dropped, or duplicated.
+
+The only guarantee is that if a process experiences a receive event there is a corresponding send event at a sending process (which may be the same process)
