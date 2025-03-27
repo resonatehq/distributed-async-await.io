@@ -12,7 +12,7 @@ It defines the rules that govern the behavior of distributed software systems.
 
 ## Distributed System
 
-A distributed system is a collection of concurrent components ([processes](/system-model/processes)) that communicate by exchanging messages over the network.
+A distributed system is a collection of concurrent components ([processes](#processes)) that communicate by exchanging messages over the network.
 Each component has exclusive access to its local state as well as its local channel to the network－In other words, components do not share state and cannot directly observe each other.
 
 <LabeledDiagram>
@@ -47,7 +47,7 @@ In the case of failure, the process fails silently.
 A process cannot be restarted.
 Instead, a new process must be created that may be considered the logical successor or the logical equivalent of the terminated process.
 
-A _term_ event may denote both a normal planned termination, or an abnormal unplanned termination ([fail-stop](/system-model/failure)).
+A _term_ event may denote both a normal planned termination, or an abnormal unplanned termination ([fail-stop](#failure)).
 
 Physical Processes are the atomic units of locality.
 This specification does not include a notion of physical nodes.
