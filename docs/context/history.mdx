@@ -8,3 +8,63 @@ sidebar_position: 1
 Within the last two decades, we saw qualitative change.
 We transitioned from long lived resources that hosted short lived executions to long lived executions that are hosted on short lived resources.
 This shift has enabled unprecedented scalability and reliability but has also introduced daunting challenges in how we develop and operate applications.
+
+Today, every application is a concurrent and distributed application. The question is no longer whether an application is concurrent and distributed, but only to what extent an application is concurrent and distributed. Today, concurrency and distribution are fundamental aspects of software engineering.
+Multiple concurrent programming models have emerged, such as actors, communicating sequential processes, and async await. Concurrent programming models elevate concurrency to a first class citizen, aiming to provide a delightful developer experience as well as reducing the potential of concurrency-related errors－errors stemming from the complexity of reasoning about concurrent execution.
+Async await has gained popularity for its intuitive concurrency semantics, offering a developer-friendly procedure-based programming model atop a machine-friendly event-based execution model.
+The async await programming model is based on functions and promises, the universal abstractions for computation and coordination: When one async function invokes another, the caller does not immediately suspend until the callee completes. Instead, the caller receives a promise—depending on the perspective, either a representation of the callee or a representation of the callee’s eventual return value. Rather than suspending involuntarily at the point of invocation, the caller can now voluntarily suspend by awaiting the promise when the result is needed.
+However, a concurrency-only programming model has significant limitations. While it provides a notion of execution and control flow between executions (in async await invoking an execution and awaiting an execution), it lacks a notion of the execution environment in which that execution takes place. As a result, it cannot express control flow across execution environments nor can it express control flow in case of the failure of an execution environment.
+Without a concept of where execution occurs, there can be no first class representation of remotely invoking an execution, remotely awaiting an execution, or failure detection and mitigation.
+
+Async Await is a programming model that does the following:
+Enables coherent sequential programming. This is in contrast to non-coherent sequential programming such as .then() statements in Javascript that pre-dated its adoption of Async Await. A coherent sequential programming model is a direct advantage to humans (the developer) and their ability to reason about the code.
+Makes concurrency a first class citizen. Concurrency as a first class citizen means that the mechanics that enable concurrency are pushed into the platform level of the language runtime. The mechanics are abstracted away so that humans (the developer) only need to interact with async, await, and promises.
+Async Await is found in many popular programming languages such as:
+Javascript / Typescript
+Python
+C#
+Swift
+Kotlin
+Rust
+Dart
+However, Async Await does not concern itself with distribution. Async Await has mechanisms for intra-runtime coordination but no mechanisms for inter-runtime coordination and recovery.
+Async Await builds on functions and promises to express coordination between concurrent executions. Notably, function executions as well as promise instances are locally scoped, that is, their identities and lifetimes are tied to the runtime.
+There are two core interactions:
+An async function execution, the caller, invokes an async function and immediately receives a promise instance representing the callee.
+An async function execution, the caller, awaits a promise instance and eventually receives a value, the return value of the callee.
+
+```text
+async function foo() {
+
+//...
+
+// 1
+let p = async bar();
+
+//...
+
+// 2
+let v = await p;
+
+//...
+
+return v;
+}
+```
+
+Invocation
+On invocation (1), (the execution of) foo triggers (the execution of) bar, at which point (the execution of) foo and (the execution of) bar execute concurrently. The invocation returns a promise instance that represents (the execution of) bar.
+Await
+On await (2), (the execution of) foo suspends its execution until (the execution of) bar terminates and completes its associated promise instance. On termination of (the execution of) bar and the completion of its associated promise instance, (the execution of) foo resumes its execution.
+
+Distributed Async Await is a programming model that makes concurrency and distribution a first class citizen. In other words, Distributed Async Await pushes the mechanics required for both concurrency and distribution into the platform level.
+Distributed Async Await has mechanisms for intra-runtime coordination, inter-runtime coordination, and recovery.
+Like async await, Distributed Async Await builds on functions and promises to express coordination between concurrent executions. Notably, function executions as well as promise instances are globally scoped, that is, their identities and lifetimes are not to the runtime.
+Like Async Await, there are two core interactions:
+Invocation: An async function execution, the caller, invokes an async function by supplying an identifier, a function, and its arguments and immediately receives a promise instance with the same identifier representing the callee.
+There are two distinct invocations:
+Local Invocation: The resulting function execution is scheduled on the local event loop, that is, not involving a global scheduling decision.
+Global Invocation: The resulting function execution is scheduled on the global event loop, that is, involving a global scheduling decision.
+Right Here: The resulting function execution is scheduled on the global event loop, but the initial execution happens in the same location as the caller
+Over There: The resulting function execution is scheduled on the global event loop
+Await: An async function execution, the caller, awaits a promise and eventually receives a value, the return value of the callee.

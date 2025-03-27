@@ -12,7 +12,7 @@ It defines the rules that govern the behavior of distributed software systems.
 
 ## Distributed System
 
-A distributed system is a collection of concurrent components ([processes](#processes)) that communicate by exchanging messages over the network.
+A distributed system is a collection of concurrent components, processes, that communicate by exchanging messages over the network.
 Each component has exclusive access to its local state as well as its local channel to the network－In other words, components do not share state and cannot directly observe each other.
 
 <LabeledDiagram>
@@ -20,15 +20,10 @@ Each component has exclusive access to its local state as well as its local chan
 </LabeledDiagram>
 
 The behavior of a distributed system emerges from the behavior of its process.
-The behavior of a process is represented by its trace, a totally ordered sequence of events, such as sending or receiving a message.
-
-Within a process, events are totally ordered.
-However, across processes, events are only partially ordered.
-We will reason about a system from a global point of view, but that is an idealized view that is not available to any one process
-
-## Processes
 
 On a process level, a system is a collection of processes, each process has a unique identity.
+Processes are the atomic units of locality.
+
 A process has a well-defined lifecycle, represented by the lifecycle events _init_ and _term_, that governs its participation in the system:
 
 **_init_** marks the initialization of the process and represents its entry into the system.
@@ -47,12 +42,14 @@ In the case of failure, the process fails silently.
 A process cannot be restarted.
 Instead, a new process must be created that may be considered the logical successor or the logical equivalent of the terminated process.
 
-A _term_ event may denote both a normal planned termination, or an abnormal unplanned termination ([fail-stop](#failure)).
+A _term_ event may denote both a normal planned termination, or an abnormal unplanned termination, fail-stop.
 
-Physical Processes are the atomic units of locality.
-This specification does not include a notion of physical nodes.
+The behavior of a process is represented by its trace, a totally ordered sequence of events, such as sending or receiving a message.
 
-## Executions
+Within a process, events are totally ordered.
+However, across processes, events are only partially ordered.
+
+Processes emit events through executions.
 
 On an execution level, a system is a collection of executions, each execution has a unique identity.
 An execution has a well-defined lifecycle, represented by the lifecycle events _invoke_ and _return_, that governs its participation in the system:
@@ -108,3 +105,27 @@ The most fine granular model of message exchange between two processes consists 
 The more common model of message exchange between two processes consists of two events, a send event at the sending process and a receive event at the receiving process. At this level of abstraction, message exchange between processes is unreliable, messages may be reordered, dropped, or duplicated.
 
 The only guarantee is that if a process experiences a receive event there is a corresponding send event at a sending process (which may be the same process)
+
+Concurrency and Distribution
+
+One logical execution consists of multiple concurrent and distributed physical executions, that is, physical executions may execute independently and on different resources.
+Concurrency
+The defining characteristic of concurrency is non-deterministic partial order; to mitigate the challenges of partial order we leverage coordination to ensure consistency.
+Distribution
+The defining characteristic of distribution is non-deterministic partial failure; to mitigate the challenges of partial failure we leverage recovery to ensure completion.
+Distribution Across Space
+An execution is distributed across space when the same logical execution spans multiple physical executions concurrently, that is, at the same point in time.
+Distribution Across Time
+An execution is distributed across time when the same logical execution spans multiple physical executions sequentially, that is, at different points in time.
+
+Physical vs logical
+Distributed Async Await makes the distinction between physical executions and logical executions.
+A logical execution can consist of multiple physical executions spanning multiple physical processes.
+For example, logical execution le1 starts as physical execution pe1 on physical process p1. Physical process p1 then experiences a crash failure. Logical execution le1 is then resumed as physical execution pe2 on physical process p2.
+Physical executions never “restart”. Each physical execution is distinct.
+A logical execution can contain many physical executions, each one starting from the beginning and attempting to make progress.
+The logical execution completes when a physical execution reaches the return statement of the function.
+
+3.2.2 Logical execution side effects
+If a logical execution can consist of multiple physical executions, and each physical execution is a completely new function execution that starts from the beginning of the function, then a logical execution is susceptible to duplicate side effects.
+Distributed Async Await uses promises to deduplicate side effects.
