@@ -1,10 +1,10 @@
 {
-  "label": "Specification",
+  "label": "Context",
   "position": 3,
   "collapsed": false,
   "collapsible": false,
   "link": {
     "type": "doc",
-    "id": "specification/index"
+    "id": "context/index"
   }
 }

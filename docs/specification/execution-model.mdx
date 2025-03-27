@@ -1,0 +1,197 @@
+---
+id: execution-model
+title: Execution Model
+sidebar_label: Execution Model
+sidebar_position: 2
+---
+
+## Durable Promise Specification
+
+Within the Distributed Async Await specification, each execution, whether that is a function execution or an action taking place in the physical world, pairs to a promise.
+
+Distributed Async Await requires that promise data objects are stored to disk, thus making the promises durable, and giving them the name Durable Promises.
+
+A promise, also called future, awaitable, or deferred is a representation of a future value.
+A promise is either pending or completed, that is, resolved or rejected: A promise is pending, signaling that the value is not yet available or completed, signaling success or failure.
+
+![Promise lifecycle diagram](/img/promise-lifecycle.svg)
+
+A promise is a coordination primitive: In a typical scenario, a downstream function execution creates a promise and awaits its completion.
+An upstream function execution either resolves or rejects the promise.
+On completion, the downstream execution resumes with the value of the promise.
+
+### Application Programming Interface (API)
+
+Logically, the Application Programming Interface (API) is divided in two parts, the Downstream API and the Upstream API.
+
+![Promise API diagram](/img/promise-api.svg)
+
+#### Downstream API
+
+- **Create**
+
+  A downstream component may create a promise.
+
+  ```
+  Create(promise-id, idempotency-key, param, header, timeout, strict)
+  ```
+
+- **Cancel**
+
+  A downstream component can cancel an existing promise.
+
+  ```
+  Cancel(promise-id, idempotency-key, value, header, strict)
+  ```
+
+- **Callback**
+
+  A downstream component can register a callback on an existing promise.
+
+  ```
+  Callback(id, promise-id, root-promise-id, timeout, recv)
+  ```
+
+  A recv specifies the transport on which the callback will occur. Below is a non-exhaustive list of supported receivers.
+
+  | Type   | Data                                                 | Shorthand            |
+  | ------ | ---------------------------------------------------- | -------------------- |
+  | `poll` | `{"group": "string", "id": "string"}`                | `poll://group:id`    |
+  | `http` | `{"headers": {"string": "string"}, "url": "string"}` | `http://example.com` |
+
+#### Upstream API
+
+- **Resolve**
+
+  An upstream component can resolve an existing promise, signaling success.
+
+  ```
+  Resolve(promise-id, idempotency-key, value, header, strict)
+  ```
+
+- **Reject**
+
+  An upstream component can reject a promise, signalling failure.
+
+  ```
+  Reject(promise-id, idempotency-key, value, header, strict)
+  ```
+
+## Distributed Recovery Protocol
+
+The Distributed Recovery Protocol is responsible for the detection and recovery of crash failures.
+
+## Distributed Coordination Protocol
+
+The **Distributed Coordination Protocol** is responsible for the coordination of distributed function executions.
+
+### Eventual Resumption
+
+Eventual resumption occurs when when the calling execution E<sub>1</sub> awaits a promise P<sub>2</sub> that is not yet resolved.
+The calling execution E<sub>1</sub> is suspended until the promise P<sub>2</sub> is resolved or rejected.
+
+![Distributed Coordination Protocol sequence diagram](/img/distributed-coordination-protocol-eventual-resumption-sequence.svg)
+
+1. When the calling execution E<sub>1</sub>, identified by Durable Promise P<sub>1</sub> and hosted on worker W<sub>1</sub>, invokes a function remotely, W<sub>1</sub> sends a request to create a Durable Promise (P<sub>2</sub>) to the server S.
+
+2. Upon receiving the request, the server S creates the durable promise P<sub>2</sub>.
+
+3. The Server S sends a response to W<sub>1</sub> which forwards P<sub>2</sub> to E<sub>1</sub>.
+
+4. The server S sends an Invoke(P<sub>2</sub>) message to process group G<sub>B</sub>, here delivered to worker W<sub>2</sub>
+
+5. Worker W<sub>2</sub> spawns execution E<sub>2</sub>
+
+6. When the calling execution E<sub>1</sub> awaits promise P<sub>2</sub>, W<sub>1</sub> sends a request to register a callback Resume(P<sub>1</sub>, P<sub>2</sub>) deliverable to G<sub>A</sub> with preference W<sub>1</sub> on P<sub>2</sub> to server S
+
+7. Upon receiving the request, since P<sub>2</sub> is still pending, server S registers the callback C<sub>1</sub> with promise P<sub>2</sub>.
+
+8. Server S sends a response indicating success to worker W<sub>1</sub>, which suspends E<sub>1</sub>
+
+9. When the called execution E<sub>2</sub> returns, the worker W<sub>2</sub> sends a request to resolve or reject durable promise P<sub>2</sub> to the server S
+
+10. Upon receiving the request, the server S resolves or rejects the durable promise P<sub>2</sub>.
+
+11. Server S sends a response containing P<sub>2</sub> to W<sub>2</sub>.
+
+12.The server S sends a Resume(P<sub>1</sub>, P<sub>2</sub>) message to process group G<sub>A</sub> with the preference of W<sub>1</sub>, here delivered to worker W<sub>1</sub>, which suspends E<sub>1</sub>.
+
+### Immediate Resumption
+
+Immediate resumption occurs when the calling execution E<sub>1</sub> awaits a promise P<sub>2</sub> that is already resolved.
+
+![Distributed Coordination Protocol sequence diagram](/img/distributed-coordination-protocol-immediate-resumption-sequence.svg)
+
+1. When the calling execution E<sub>1</sub>, identified by durable promise P<sub>1</sub> and hosted on worker W<sub>1</sub>, invokes a function remotely, W<sub>1</sub> sends a request to create a durable promise P<sub>2</sub> to the server S.
+
+2. Upon receiving the request, the server S creates the durable promise P<sub>2</sub>.
+
+3. Server S sends a response to W<sub>1</sub>, which forwards P<sub>2</sub> to E<sub>1</sub>.
+
+4. The server S sends an Invoke(P<sub>2</sub>) message to process group G<sub>B</sub>, here delivered to worker W<sub>2</sub>.
+
+5. Worker W<sub>2</sub> spawns execution E<sub>2</sub>.
+
+6. When the called execution E<sub>2</sub> returns, the worker W<sub>2</sub> sends a request to resolve or reject durable promise P<sub>2</sub> to the server S.
+
+7. Upon receiving the request, the server S resolves or rejects the durable promise P<sub>2</sub>.
+
+8. Server S sends a response containing P<sub>2</sub> to W<sub>2</sub>.
+
+9. When the calling execution E<sub>1</sub> awaits promise P<sub>2</sub>, W<sub>1</sub> sends a request to register a callback Resume(P<sub>1</sub>, P<sub>2</sub>) deliverable to G<sub>A</sub> with preference W<sub>1</sub> on P<sub>2</sub> to server S.
+
+10. Upon receiving the request, since P<sub>2</sub> is already completed, server S **does not** register a callback.
+
+11. Server S sends a response indicating the callback was not registered because the promise is already completed to worker W<sub>1</sub>, which resumes E<sub>1</sub>.
+
+## Message Passing Protocol
+
+The Distributed Async Await specification relies on low-level message-passing semantics.
+
+The Message-Passing Protocol MUST support a wide array of transport mechanisms such as push or poll over http or message queues.
+Therefore, the specification defines the behavior of sending and receiving messages between processes with minimal requirements and minimal guarantees.
+
+### Messaging
+
+Every component may issue a Send(address, message) command that will result in emitting a Send(address, message) event.
+
+```text
+command Send<T>(address : Address, message : T)
+```
+
+The Send command is the foundation of Distributed Async Await’s failover mechanics: Send’s AnyCast semantics enables both routing as well as transparent rerouting in case of failure.
+This ensures that distributed executions can adapt dynamically to changes in the process topology automatically.
+
+Invoke-Resume Example: The Canonical Interaction
+
+The canonical interaction in Distributed Async Await involves invoking and awaiting an asynchronous function remotely (see [Distributed Coordination Protocol](#distributed-coordination-protocol)).
+This interaction involves two messages:
+
+**Invoke**
+
+_invoke_ represents the request to invoke an execution.
+
+**Resume**
+
+_resume_ represents the request to resume an awaiting execution.
+
+### Addressing
+
+Processes communicate via addresses. Distributed Async Await supports two types of addresses, UniCast addresses and AnyCast addresses.
+
+UniCast. A UniCast address denotes an individual process.
+AnyCast. An AnyCast address denotes a group of processes.
+
+```text
+data Address =
+  | UniCast PSpecifier
+  | AnyCast GSpecifier x optional<PSpecifier>
+```
+
+- PSpecifier denotes a transport-specific specifier specifying a single progress.
+- GSpecifier denotes a transport-specific specifier specifying a group of processes.
+
+#### Address Resolution
+
+This specification does not determine how and when addresses are resolved.
+Specifically, this specification does not determine whether addresses are resolved on send (early binding) or on recv (late binding).
