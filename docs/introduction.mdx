@@ -11,7 +11,7 @@ last_update:
 
 import { DAACallOut } from "@site/src/components/DAACallOut/DAACallOut";
 
-<DAACallOut>Version 1.0 (Unreleased)</DAACallOut>
+<DAACallOut title="Version 1.0 (Unreleased)"></DAACallOut>
 
 ## _Summary_
 
@@ -19,25 +19,31 @@ The purpose of this document is to formalize Distributed Async Await－an open, 
 
 ## Context
 
-Today, the question is no longer whether an application is concurrent and distributed, but only to what extent an application is concurrent and distributed. Today, concurrency and distribution are fundamental aspects of software engineering.
+Today, the question is no longer whether an application is concurrent and distributed, but only to what extent an application is concurrent and distributed.
+Today, concurrency and distribution are fundamental aspects of software engineering.
 
-Multiple popular concurrent programming models have emerged, that is, programming models tht elevate concurrency to a first class citizen, aiming to improve building non-distributed, concurrent applications. However, no popular concurrent and distributed programming models have emerged yet.
+Multiple popular concurrent programming models have emerged, that is — programming models that elevate concurrency to a first class citizen, aiming to improve building non-distributed, concurrent applications.
+However, no popular concurrent and distributed programming models have emerged yet.
 
-:::info[Concurrency and Distribution]
+<DAACallOut
+title="Concurrency and Distribution">
 
-Concurrency and distribution are fundamental aspects of software engineering. In the context of this specification, concurrency and distribution are charaterized as:
+Concurrency and distribution are fundamental aspects of software engineering.
+In the context of this specification, concurrency and distribution are charaterized as:
 
-#### Concurrency
+**Concurrency**
 
-The defining charateristic of concurrency is non-determinisitic execution order. In a concurrent system, we do not know what happens next.
+The defining charateristic of concurrency is non-determinisitic execution order.
+In a concurrent system, we do not know what happens next.
 
-#### Distribution
+**Distribution**
 
-The defining charateristic of distribution is non-determinisitic partial failure. In a distributed system, we do not know what fails next.
+The defining charateristic of distribution is non-determinisitic partial failure.
+In a distributed system, we do not know what fails next.
 
 Therefore, by definition, a concurrent and distributed programming model supports _coordination_ to tame non-determinisitic execution order and _recovery_ to tame non-determinisitic partial failure.
 
-:::
+</DAACallOut>
 
 ## Purpose of the specification
 
@@ -45,11 +51,15 @@ The purpose of this document is to formalize Distributed Async Await－an open, 
 
 Distributed Async Await is a programming model that offers a delightful developer experience for building scalable and reliable distributed systems by making concurrency and distribution first class citizens of the programming model.
 
-:::info[Developer Experience and Simplicity]
+<DAACallOut
+title="Developer Experience and Simplicity"
+>
 
-Developer experience is often described through two lenses: the subjective lens of developer satisfaction and the objective lens of developer productivity. While challenging to define, developer experience remains a critical aspect of software development.
+Developer experience is often described through two lenses: the subjective lens of developer satisfaction and the objective lens of developer productivity.
+While challenging to define, developer experience remains a critical aspect of software development.
 
-This specification ties developer experience to simplicity. We posit that a delightful developer experience emerges from systems that are:
+This specification ties developer experience to simplicity.
+We posit that a delightful developer experience emerges from systems that are:
 
 - Simple to understand
 - Simple to develop
@@ -57,12 +67,12 @@ This specification ties developer experience to simplicity. We posit that a deli
 
 **complex problems, simple code, peace of mind**
 
-:::
+</DAACallOut>
 
 ## Structure of the specification
 
 This specification consits of three prescriptive parts:
 
-1. Specification of the programming model
-2. Specification of the execution model
-3. Specification of the system model
+1. Specification of the [programming model](/specification/programming-model)
+2. Specification of the [execution model](/specification/execution-model)
+3. Specification of the [system model](/specification/system-model)

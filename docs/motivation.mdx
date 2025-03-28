@@ -1,78 +1,212 @@
 ---
 id: motivation
-slug: /motivation
 title: Motivation
-description: Motivation
 sidebar_label: Motivation
 sidebar_position: 2
-last_update:
-  date: "03-21-2025"
 ---
 
-# Motivation
+import { LabeledDiagram } from "@site/src/components/LabeledDiagram/LabeledDiagram";
+import { DAACallOut } from "@site/src/components/DAACallOut/DAACallOut";
 
-Today, the question is no longer whether an application is concurrent and distributed, but only to what extent an application is concurrent and distributed. Today, concurrency and distribution are fundamental aspects of software engineering.
+<DAACallOut title="Historical context and motivation for Distributed Async Await"></DAACallOut>
 
-In March 2006, AWS launched S3, and in August 2006, EC2. Since then, the number of cloud applications, and therefore distributed applications, has exploded. However, within the last two decades, we did not only see a quantitative change, we also saw qualitative change.
+### Rise of Concurrency and Distribution
 
-We transitioned from long lived resources that hosted short lived executions to long lived executions that are hosted on short lived resources.
+The trajectory of software development over the past two decades reveals a fundamental shift: from sequential to concurrent systems, and from concurrent to distributed systems.
+This evolution was not only inevitable, but necessary.
+Today, the question is no longer _if_ an application is concurrent or distributed, but _to what degree_.
 
-## Short-lived executions on long-lived resources
+This shift began in earnest in 2006, when AWS launched S3 and EC2, catalyzing the modern era of cloud computing.
+The launch of cloud primitives marked the beginning of the mass adoption of distributed computing.
+As cloud-native applications emerged as the dominant paradigm, so too did the complexity of their execution environments.
 
-From mid 2000s to mid 2010s, systems consisted of short-lived executions hosted on long-lived resources (processes, containers, or virtual machines). Execution terminated within 100s of milliseconds while resource termination was a rare and exceptional event. Therefore, the probability of an interruption mid-execution was low. From the point of view of the application, continuity was (almost) guaranteed. Developers wrote code with the assumption the code would run to completion without interruption, greatly simplifying the developer experience.
+What began as short-lived computations on long-lived servers transitioned to long-lived computations on short-lived servers.
+The reliability and stability that developers could once assume—the idea that a process would run to completion—was replaced with the reality of near-certain interruptions.
+Continuity could no longer be presumed; fragmentation became the default.
 
-<figure>
-![Short Running Executions on Long Runnning Resources](/img/short-running-on-long-running.jpg)
-<figcaption>Short running executions hosted on long running resources may rely continuity. Developers write code with the assumption the code would run to completion without interruption, greatly simplifying the development experience.</figcaption>
-</figure>
+### New Execution Landscape
 
-:::note[Cloud Applications]
+From the mid-2000s to the mid-2010s, applications operated on long-lived virtual machines or containers.
 
-From mid 2000s to mid 2010s, cloud applications became the dominant type of applications
+<LabeledDiagram>
+  <img
+    src="/img/short-running-on-long-running.svg"
+    alt="Short Running Executions on Long Runnning Resources"
+  />
+</LabeledDiagram>
 
-#### Charateristics
+Computations were short and predictable, often completing within milliseconds. The rare failure was an anomaly, and developers could safely write code assuming successful, uninterrupted completion.
 
-- low degree of distribution accross space
-- low degree of distribution acrcoss time
-- low frequency of interruptions
+In the post-2010 landscape, however, that assumption collapsed.
+Compute resources became ephemeral.
+Virtual machines, containers, and even functions could come and go with little warning.
+Consider food delivery, ride-hailing, or vacation rentals—tasks that unfold over minutes, hours, or even days.
+Executions became long-lived, but the infrastructure became short-lived, flipping the model.
 
-#### Consequences
+<LabeledDiagram>
+  <img
+    src="/img/long-running-on-short-running.svg"
+    alt="Long Running Executions on Short Runnning Resources"
+  />
+</LabeledDiagram>
 
-- (almost) guaranteed continuity
+This shift created an asymmetry: executions now outlived their hosts.
+To cope, systems needed to coordinate across both **space** (distribution across machines) and **time** (distribution across lifetimes).
 
-:::
+### Programming Models for Concurrency
 
-## Long-lived executions on short-lived resources
+The initial response to growing complexity was the development of concurrent programming models.
+Threads offered a low-level way to express concurrency, but introduced unpredictability and complexity.
+The introduction of _async await_ marked a pivotal advancement: an intuitive, procedure-based syntax that abstracted away the mechanics of concurrency while preserving clarity.
 
-From mid 2010s to today, systems consisted of long-lived executions hosted on short-lived resources (processes, containers, or virtual machines). Executions terminate within minutes, to hours, to days or weeks while resource termination is a frequent and expected event. Therefore, the probability of an interruption mid-execution is high. From the point of view of the application, continuity is not (almost) guaranteed. Developers write code with the assumption the code would not run to completion without interruption, greatly complicating the development experience.
+Async await replaced opaque callback chains with clean, readable logic.
+Rather than writing event-driven code that manually tracked state and control flow, developers could write code that _looked_ sequential but _executed_ asynchronously.
 
-<figure>
-![Long Running Executions on Short Runnning Resources](/img/long-running-on-short-running.jpg)
-<figcaption>Long running executions hosted on short running resources may not rely continuity. Developers write code with the assumption the code would not run to completion without interruption, greatly complicating the development experience.</figcaption>
-</figure>
+<DAACallOut
+title="Invoke and Await"
+>
 
-:::note[Cloud Native Applications]
+```text
+function foo() {
 
-From mid 2010s to today, cloud native applications became the dominant type of applications
+    //...
 
-#### Charateristics
+    // 1
+    promise = async bar();
 
-- high degree of distribution accross space
-- high degree of distribution acrcoss time
-- high frequency of interruptions
+    //...
 
-#### Consequences
+    // 2
+    let value = await promise;
 
-- (almost) guaranteed fragmentation
+    //...
 
-:::
+    return v;
 
-## Coordination and Recovery accross Time and Space
+}
 
-Long lived executions on short lived resources introduce fundamental requirements: coordination and recovery across time and space.
+function bar() {
+//...
+return v;
+}
 
-#### References
+```
 
-- [Helland, P., & Campbell, D.G. (2009). Building on Quicksand. ArXiv, abs/0909.1788.](https://arxiv.org/pdf/0909.1788) <br/>
-*We have observed the pattern in which a fault tolerant algorithm* **[Author’s note: Long running executios]** *is broken into idempotent sub-algorithms. By capturing sufficient information between the idempotent steps and sending it across the failure boundary,* **[Author’s note: Short running resources]** *the overarching algorithm can tolerate faults.*
+**Invocation**
 
+An async function execution, the caller, invokes an async function and immediately receives a promise instance representing the callee.
+On invocation (1), (the execution of) foo triggers (the execution of) bar, at which point (the execution of) foo and (the execution of) bar execute concurrently.
+The invocation returns a promise instance that represents (the execution of) bar.
+
+**Await**
+
+An async function execution, the caller, awaits a promise instance and eventually receives a value, the return value of the callee.
+On await (2), (the execution of) foo suspends its execution until (the execution of) bar terminates and completes its associated promise instance.
+On termination of (the execution of) bar and the completion of its associated promise instance, (the execution of) foo resumes its execution.
+
+</DAACallOut>
+
+But async await, despite its elegance, stopped at the boundary of the process. It was concurrency-focused.
+It had no concept of remote invocation, no facility for distribution, and no notion of recovery across process or machine failures.
+As systems became distributed by necessity, async await revealed its limits.
+
+### Distribution-Aware Abstractions
+
+Distributed systems are defined by two core properties: _partial order_ and _partial failure_. In concurrent systems, operations may interleave in unpredictable ways.
+In distributed systems, operations may also _fail_ in unpredictable ways.
+
+<DAACallOut
+title="Partial Order and Partial Failure"
+>
+
+Consider a simple example, two processes P and Q, each consisting of just three steps.
+
+P = a • b • c
+
+Q = x • y • z
+
+**(P | Q | ⚡️) ≡ (P • Q) ∨ (Q • P)**
+
+<LabeledDiagram>
+  <img
+    src="/img/partial-order-partial-failure.gif"
+    alt="Partial Order and Partial Failure"
+  />
+</LabeledDiagram>
+
+The concurrent composition of 2 processes consisting of 3 steps leads to 20 distinct possible executions.
+The distributed composition of 2 processes consisting of 3 steps leads to 69 distinct possible executions.
+
+</DAACallOut>
+
+To mitigate partial order, we need **coordination**.
+To mitigate partial failure, we need **recovery**.
+
+Traditional programming models did not address these challenges.
+HTTP calls and task queues became the ad hoc glue for distributed interactions.
+These mechanisms, however, introduced new problems:
+
+- HTTP tightly coupled caller and callee.
+- Task queues loosely coupled execution, but sacrificed visibility, debuggability, and value propagation.
+
+Control flow across machines became fragmented.
+Distributed executions lost identity.
+Developers were burdened with choreography, orchestration, compensation, retries, and outbox patterns.
+Somewhere in the middle, actual application logic was written.
+
+### Durable Executions and Logical Continuity
+
+Enter the concept of **durable executions**.
+At its core, durable execution means the ability to _resume_ an execution after a failure or voluntary suspension.
+This doesn’t require magic.
+If an execution is composed of idempotent steps and maintains externalized state, it can be restarted from the beginning, and will converge to the same result.
+
+This idea has existed in practice through tools like Apache Hadoop, Temporal, AWS Step Functions, and more.
+But many of these frameworks rely on proprietary abstractions and centralized orchestrators that make composition difficult and developer experience burdensome.
+
+### Distributed Async Await: A Formal Model
+
+Distributed Async Await extends the async await model by elevating **distribution** to a first-class concern.
+It introduces durable, globally-addressable promises and executions.
+These promises are not tied to a process; they are tied to an identity and stored durably.
+
+Like traditional async await, there are two primary operations:
+
+- **Invoke**: Create a new execution, identified by a durable promise.
+- **Await**: Suspend until the promise resolves or rejects.
+
+But unlike traditional async await, Distributed Async Await differentiates between:
+
+- **Local Invocation**: Execution is scheduled locally, within the current process.
+- **Remote Invocation**: Execution is scheduled on the global event loop, potentially on a different process or machine.
+
+This design introduces two foundational protocols:
+
+1. **The Distributed Event Loop Protocol** ensures coordination across partial order. It implements a consistent mechanism for invoke and resume messages.
+2. **The Distributed Task Protocol** ensures recovery from partial failure. It introduces heartbeats, task claiming, and message redelivery in case of process crashes.
+
+### Unified Semantics and Developer Experience
+
+Distributed Async Await preserves the developer ergonomics of async await while introducing clear, formalized semantics for distribution.
+By using functions and promises as composable primitives, it provides a unified model for computation and coordination.
+
+Developers gain the ability to:
+
+- Express remote invocations using the same structure as local calls.
+- Maintain a coherent, traceable call graph across machines.
+- Propagate results and errors through durable promises.
+- Recover executions transparently after failure.
+
+In doing so, Distributed Async Await bridges the gap between the promise of distributed systems—scalability, fault tolerance—and the reality of building them.
+
+### Conclusion
+
+Software engineering is shaped by its abstractions.
+Good abstractions preserve desired properties while offering a delightful developer experience.
+The shift from sequential to concurrent to distributed programming has exposed the need for better abstractions that don't just mask complexity but embrace and structure it.
+
+Distributed Async Await represents a new foundation.
+It captures the operational realities of cloud-native systems—distribution across space and time—while offering a programming model grounded in clarity and composability.
+By doing so, it transforms the fragmented and ad hoc into the structured and coherent.
+
+Not by hiding the cloud, but by making it programmable.
