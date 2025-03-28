@@ -1,0 +1,89 @@
+---
+id: motivation
+slug: /motivation
+title: Motivation
+description: Motivation
+sidebar_label: Motivation
+sidebar_position: 2
+last_update:
+  date: "03-21-2025"
+---
+
+# Motivation
+
+Today, the question is no longer whether an application is concurrent and distributed, but only to what extent an application is concurrent and distributed. Today, concurrency and distribution are fundamental aspects of software engineering.
+
+In March 2006, AWS launched S3, and in August 2006, EC2. Since then, the number of cloud applications, and therefore distributed applications, has exploded. However, within the last two decades, we did not only see a quantitative change, we also saw qualitative change.
+
+We transitioned from long lived resources that hosted short lived executions to long lived executions that are hosted on short lived resources.
+
+## Short-lived executions on long-lived resources
+
+From mid 2000s to mid 2010s, systems consisted of short-lived executions hosted on long-lived resources (processes, containers, or virtual machines). Execution terminated within 100s of milliseconds while resource termination was a rare and exceptional event. Therefore, the probability of an interruption mid-execution was low. From the point of view of the application, continuity was (almost) guaranteed. Developers wrote code with the assumption the code would run to completion without interruption, greatly simplifying the developer experience.
+
+<figure>
+  ![Short Running Executions on Long Runnning
+  Resources](/img/short-running-on-long-running.jpg)
+  <figcaption>
+    Short running executions hosted on long running resources may rely
+    continuity. Developers write code with the assumption the code would run to
+    completion without interruption, greatly simplifying the development
+    experience.
+  </figcaption>
+</figure>
+
+:::note[Cloud Applications]
+
+From mid 2000s to mid 2010s, cloud applications became the dominant type of applications
+
+#### Charateristics
+
+- low degree of distribution accross space
+- low degree of distribution acrcoss time
+- low frequency of interruptions
+
+#### Consequences
+
+- (almost) guaranteed continuity
+
+:::
+
+## Long-lived executions on short-lived resources
+
+From mid 2010s to today, systems consisted of long-lived executions hosted on short-lived resources (processes, containers, or virtual machines). Executions terminate within minutes, to hours, to days or weeks while resource termination is a frequent and expected event. Therefore, the probability of an interruption mid-execution is high. From the point of view of the application, continuity is not (almost) guaranteed. Developers write code with the assumption the code would not run to completion without interruption, greatly complicating the development experience.
+
+<figure>
+  ![Long Running Executions on Short Runnning
+  Resources](/img/long-running-on-short-running.jpg)
+  <figcaption>
+    Long running executions hosted on short running resources may not rely
+    continuity. Developers write code with the assumption the code would not run
+    to completion without interruption, greatly complicating the development
+    experience.
+  </figcaption>
+</figure>
+
+:::note[Cloud Native Applications]
+
+From mid 2010s to today, cloud native applications became the dominant type of applications
+
+#### Charateristics
+
+- high degree of distribution accross space
+- high degree of distribution acrcoss time
+- high frequency of interruptions
+
+#### Consequences
+
+- (almost) guaranteed fragmentation
+
+:::
+
+## Coordination and Recovery accross Time and Space
+
+Long lived executions on short lived resources introduce fundamental requirements: coordination and recovery across time and space.
+
+#### References
+
+- [Helland, P., & Campbell, D.G. (2009). Building on Quicksand. ArXiv, abs/0909.1788.](https://arxiv.org/pdf/0909.1788) <br/>
+  _We have observed the pattern in which a fault tolerant algorithm_ **[Author’s note: Long running executios]** _is broken into idempotent sub-algorithms. By capturing sufficient information between the idempotent steps and sending it across the failure boundary,_ **[Author’s note: Short running resources]** _the overarching algorithm can tolerate faults._
