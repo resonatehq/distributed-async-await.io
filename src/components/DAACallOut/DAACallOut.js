@@ -5,8 +5,8 @@ export const DAACallOut = ({ title, children }) => (
     style={{
       borderColor: "#3cc9a7",
       borderWidth: "0 0 0 4px",
-      padding: "8px 8px 8px 16px",
-      margin: "8px 0",
+      padding: "12px 8px 8px 16px",
+      margin: "0 0 16px 0",
       borderStyle: "solid",
       // backgroundColor: "#f0f8f7",
     }}
