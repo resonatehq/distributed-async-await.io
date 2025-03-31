@@ -1,0 +1,10 @@
+{
+  "label": "System Model",
+  "position": 3,
+  "collapsed": false,
+  "collapsible": false,
+  "link": {
+    "type": "doc",
+    "id": "specification/system-model/index"
+  }
+}

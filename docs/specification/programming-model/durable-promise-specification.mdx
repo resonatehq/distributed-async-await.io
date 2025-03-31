@@ -20,7 +20,9 @@ A promise is a coordination primitive: In a typical scenario, a downstream funct
 An upstream function execution either resolves or rejects the promise.
 On completion, the downstream execution resumes with the value of the promise.
 
-## Application Programming Interface (API)
+## API
+
+**Durable Promise Application Programming Interface**
 
 Logically, the Application Programming Interface (API) is divided in two parts, the Downstream API and the Upstream API.
 
@@ -61,7 +63,7 @@ Logically, the Application Programming Interface (API) is divided in two parts, 
   | `poll` | `{"group": "string", "id": "string"}`                | `poll://group:id`    |
   | `http` | `{"headers": {"string": "string"}, "url": "string"}` | `http://example.com` |
 
-#### Upstream API
+### Upstream API
 
 - **Resolve**
 

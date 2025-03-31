@@ -1,0 +1,17 @@
+---
+id: distributed-systems
+title: Distributed Systems
+sidebar_label: Distributed Systems
+sidebar_position: 1
+---
+
+import { LabeledDiagram } from "@site/src/components/LabeledDiagram/LabeledDiagram";
+
+A distributed system is a collection of concurrent components, processes, that communicate by exchanging messages over the network.
+Each component has exclusive access to its local state as well as its local channel to the network－In other words, components do not share state and cannot directly observe each other.
+
+<LabeledDiagram>
+  <img src="/img/distributed-system.svg" alt="Distributed System diagram" />
+</LabeledDiagram>
+
+The behavior of a distributed system emerges from the behavior of its process.
