@@ -2,7 +2,7 @@
 id: system-model
 title: System Model
 sidebar_label: System Model
-sidebar_position: 3
+sidebar_position: 4
 ---
 
 import { LabeledDiagram } from "@site/src/components/LabeledDiagram/LabeledDiagram";
@@ -133,3 +133,13 @@ The logical execution completes when a physical execution reaches the return sta
 3.2.2 Logical execution side effects
 If a logical execution can consist of multiple physical executions, and each physical execution is a completely new function execution that starts from the beginning of the function, then a logical execution is susceptible to duplicate side effects.
 Distributed Async Await uses promises to deduplicate side effects.
+
+## Long running executions
+
+The term long running is not a well-defined term in the context of distributed systems.
+This is because "long" is relative.
+
+This system model argues that you should not think about "long" in terms of time.
+Instead, long refers to the potention for a logical execution to span multiple physical locations.
+
+Therefor an execution is long running if it potentially runs across multiple processes.
