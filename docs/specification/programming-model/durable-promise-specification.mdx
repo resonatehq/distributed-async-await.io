@@ -88,6 +88,213 @@ Logically, the Application Programming Interface (API) is divided in two parts, 
   Reject(promise-id, idempotency-key, value, header, strict)
   ```
 
+### OpenAPI spec example
+
+```yaml
+openapi: 3.0.0
+info:
+  title: Durable Promise API
+  version: x.x.x
+  license:
+    name: Apache 2.0
+    url: https://opensource.org/license/apache-2-0
+
+servers:
+  - url: https://your_public_api_url
+    description: <your_public_server_description>
+  - url: http://localhost:<port>
+    description: <your_local_server_description>
+
+paths:
+  /promises:
+    get:
+      tags: [Promises]
+      summary: Search promises
+      operationId: searchPromises
+      parameters:
+        - in: header
+          name: request-id
+          schema: { type: string }
+        - name: id
+          in: query
+          schema: { type: string }
+        - name: state
+          in: query
+          schema: { type: string, enum: [pending, resolved, rejected] }
+        - name: tags
+          in: query
+          style: deepObject
+          explode: true
+          schema:
+            type: object
+            additionalProperties: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer }
+        - name: cursor
+          in: query
+          schema: { type: string }
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  promises:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Promise"
+                  cursor:
+                    type: string
+    post:
+      tags: [Promises]
+      summary: Create promise
+      operationId: createPromise
+      parameters:
+        - in: header
+          name: request-id
+          schema: { type: string }
+        - in: header
+          name: idempotency-key
+          schema: { type: string }
+        - in: header
+          name: strict
+          schema: { type: boolean }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, timeout]
+              properties:
+                id: { type: string }
+                timeout: { type: integer, format: int64 }
+                param: { $ref: "#/components/schemas/Value" }
+                tags:
+                  type: object
+                  additionalProperties: { type: string }
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Promise" }
+        201:
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Promise" }
+        400: { description: Invalid request }
+        403: { description: Forbidden }
+        409: { description: Promise already exists }
+
+  /promises/{id}:
+    get:
+      tags: [Promises]
+      summary: Read promise
+      operationId: readPromise
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - in: header
+          name: request-id
+          schema: { type: string }
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Promise" }
+        400: { description: Invalid request }
+        404: { description: Promise not found }
+
+    patch:
+      tags: [Promises]
+      summary: Complete promise
+      operationId: completePromise
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - in: header
+          name: request-id
+          schema: { type: string }
+        - in: header
+          name: idempotency-key
+          schema: { type: string }
+        - in: header
+          name: strict
+          schema: { type: boolean }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [state]
+              properties:
+                state:
+                  type: string
+                  enum: [RESOLVED, REJECTED, REJECTED_CANCELED]
+                value: { $ref: "#/components/schemas/Value" }
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Promise" }
+        400: { description: Invalid request }
+        403: { description: Forbidden }
+        404: { description: Promise not found }
+
+components:
+  schemas:
+    Promise:
+      type: object
+      required: [id, state, timeout, param, value, tags]
+      properties:
+        id: { type: string }
+        state:
+          type: string
+          enum:
+            [PENDING, RESOLVED, REJECTED, REJECTED_CANCELED, REJECTED_TIMEDOUT]
+        timeout: { type: integer, format: int64 }
+        param: { $ref: "#/components/schemas/Value" }
+        value: { $ref: "#/components/schemas/Value" }
+        tags:
+          type: object
+          additionalProperties: { type: string }
+        idempotencyKeyForCreate: { type: string, readOnly: true }
+        idempotencyKeyForComplete: { type: string, readOnly: true }
+        createdOn: { type: integer, format: int64 }
+        completedOn: { type: integer, format: int64 }
+
+    Value:
+      type: object
+      properties:
+        headers:
+          type: object
+          additionalProperties: { type: string }
+        data: { type: string }
+
+    Task:
+      type: object
+      required: [id, counter, timeout]
+      properties:
+        id: { type: string }
+        counter: { type: integer }
+        timeout: { type: integer, format: int64 }
+        processId: { type: string }
+        createdOn: { type: integer, format: int64 }
+        completedOn: { type: integer, format: int64 }
+```
+
 ## State transitions
 
 |     | Current State          | Action                | Next State             | Output               |
