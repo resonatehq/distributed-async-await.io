@@ -53,16 +53,20 @@ The only guarantee is that if a process experiences a receive event there is a c
 ## Concurrency and Distribution
 
 One logical execution consists of multiple concurrent and distributed physical executions, that is, physical executions may execute independently and on different resources.
-Concurrency
+
+### Concurrency
+
 The defining characteristic of concurrency is non-deterministic partial order; to mitigate the challenges of partial order we leverage coordination to ensure consistency.
-Distribution
+
+###Distribution
 The defining characteristic of distribution is non-deterministic partial failure; to mitigate the challenges of partial failure we leverage recovery to ensure completion.
 Distribution Across Space
 An execution is distributed across space when the same logical execution spans multiple physical executions concurrently, that is, at the same point in time.
 Distribution Across Time
 An execution is distributed across time when the same logical execution spans multiple physical executions sequentially, that is, at different points in time.
 
-Physical vs logical
+### Physical vs logical
+
 Distributed Async Await makes the distinction between physical executions and logical executions.
 A logical execution can consist of multiple physical executions spanning multiple physical processes.
 For example, logical execution le1 starts as physical execution pe1 on physical process p1. Physical process p1 then experiences a crash failure. Logical execution le1 is then resumed as physical execution pe2 on physical process p2.
