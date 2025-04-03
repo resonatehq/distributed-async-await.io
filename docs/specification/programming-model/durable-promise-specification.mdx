@@ -7,6 +7,13 @@ sidebar_position: 2
 
 import { LabeledDiagram } from "@site/src/components/LabeledDiagram/LabeledDiagram";
 
+:::tip Units of Coordination
+
+Promises are **fundamental units of coordination**.
+Distributed Async Await proposes Durable Promises — that is, promises that persist in storage and enable coordination across process boundaries.
+
+:::
+
 Within the Distributed Async Await specification, each execution, whether that is a function execution or an action taking place in the physical world, pairs to a promise.
 
 Distributed Async Await requires that promise data objects are stored to disk, thus making the promises durable, and giving them the name Durable Promises.
