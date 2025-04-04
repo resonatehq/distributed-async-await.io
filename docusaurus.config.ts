@@ -7,7 +7,7 @@ const config: Config = {
   favicon: "img/favicon.ico",
 
   // Set the production url of your site here
-  url: "https://daa-spec.resonatehq.io",
+  url: "https://distributed-async-await.io",
   // Set the /<baseUrl>/ pathname under which your site is served
   // For GitHub pages deployment, it is often '/<projectName>/'
   baseUrl: "/",
@@ -15,7 +15,7 @@ const config: Config = {
   // GitHub pages deployment config.
   // If you aren't using GitHub pages, you don't need these.
   organizationName: "resonatehq", // Usually your GitHub org/user name.
-  projectName: "daa-spec.resonatehq.io", // Usually your repo name.
+  projectName: "distributed-async-await.io", // Usually your repo name.
 
   onBrokenLinks: "throw",
   onBrokenMarkdownLinks: "warn",
