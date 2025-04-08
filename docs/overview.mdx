@@ -1,0 +1,81 @@
+---
+id: overview
+title: Overview
+sidebar_label: Overview
+sidebar_position: 2
+---
+
+:::tip Extending async await
+
+Distributed Async Await is a programming model based on async await that offers a simple, delightful developer experience for building modern, concurrent and distributed applications.
+
+:::
+
+## Durable Functions and Durable Promises
+
+```js
+async function foo(m : number) {
+  let r = 0;
+  for(let i = 0; i < m; i++) {
+    // remotely invoke bar
+    const p = async_r bar(i)
+    // await promise
+    const v = await p
+    r = r + v;
+  }
+  return r;
+}
+```
+
+Just like async await is based on functions and promises, Distributed Async Await is based on _durable functions_ and _durable promises_. Durable Functions and Durable Promises guarantee continuity in case of interruptions.
+
+:::info Durable Executions & Resume Semantics
+
+Distributed Async Await is a variant of Durable Executions. A _Durable Execution_ is a function execution that, if the execution is invoked, interrupted, restarted, and completes, is equivalent to some function execution that is invoked and completes. Therefore, Durable Executions provide _resume semantics_ in case of an interruption.
+
+![Durable Executions & Resume Semantics](/img/resume-via-restart.jpg)
+
+:::
+
+### Mechanics
+
+Distributed Async Await durably persists the state of an execution after each step of the execution. In case of an interruption, the system recreates the function execution from the persited state and continues from there.
+
+In traditional, _ephemeral_ async await, the state of a function execution－its control flow and local variables－is stored in ephemeral memory. If the process hosting the function execution crashes, the function execution is lost.
+
+In Distributed Async Await, the state necessary to recreate the function execution is stored in durable memory.
+
+### Steps and State
+
+In Distributed Async Await
+
+- a function invocation creates a durable promise, and
+- an await suspends on that durable promise.
+
+Consider the following function that is equivalent to an unrolled `foo(3)`:
+
+```js
+async function foo() {
+  let r = 0;
+  // 1st iteration
+  const p0 = async_r bar(0)  // invoking durable function
+  const v0 = await p0;       // awaiting durable promise
+  r = r + v0
+  // 2nd iteration
+  const p1 = async_r bar(1)  // invoking durable function
+  const v1 = await p1;       // awaiting durable promise
+  r = r + v1
+  // 3rd iteration
+  const p2 = async_r bar(2)  // invoking durable function
+  const v2 = await p2;       // awaiting durable promise
+  r = r + v2
+  // end
+  return r
+}
+```
+
+Durable promises persist the return value of the function execution they represent. If the execution crashes and restarts, the execution deduplicates function invocations and their return values, effectively recreating their execution state before the crash.
+
+On restart, invoking a durable function that was already invoked is safe: the durable promise already exists, the invocation will be deduplicated. Awaiting a completed durable promise is safe: the durable promise is already completed, the execution immediately yields the same value.
+
+In other words, the execution does not need to durably persist its ephemeral execution state. Instead, durably persisting the return values of child functions is sufficient.
