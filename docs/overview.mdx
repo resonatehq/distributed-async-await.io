@@ -1,0 +1,40 @@
+---
+id: overview
+title: Overview
+sidebar_label: Overview
+sidebar_position: 2
+---
+
+import { DAACallOut } from "@site/src/components/DAACallOut/DAACallOut";
+
+Distributed Async Await is a programming model based on async await that offers a simple, delightful developer experience for building modern, concurrent and distributed applications.
+
+Distributed Async Await is a procedure-based programming model on top of an event-driven execution model.
+
+```typescript
+// A concurrent, distributed, long-running workflow that reads like a simple loop
+function countdown(context : Context, phone : string, count : number) {
+
+  for(let index = count; index > 0; index--) {
+
+    // Call local or remote functions with the same syntax and semantics
+    await (async notify(phone, index));
+
+    // Sleep for hours, days, weeks, months, or years
+    await sleep("1 day";)
+
+  }
+
+}
+```
+
+### Grammer
+
+```
+
+distributed async await function ::=
+  | async_r
+  | async_l
+  | await
+
+```

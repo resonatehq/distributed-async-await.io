@@ -13,59 +13,44 @@ import { DAACallOut } from "@site/src/components/DAACallOut/DAACallOut";
 
 <DAACallOut title="Version 1.0 (Unreleased)"></DAACallOut>
 
-## _Summary_
+## _tl;dr_
 
-The purpose of this document is to formalize Distributed Async Await－an open, vendor-neutral specification of a programming model based on async await and an underlying scalable and reliable distributed execution model.
+*The purpose of this document is to formalize Distributed Async Await－an open, vendor-neutral specification of a programming model based on async await and an underlying scalable and reliable distributed execution model.*
+
+- *Based on Functions and Promises*
+- *Simple to understand*
+- *Simple to develop*
+- *Simple to operate*
+
+**Solve complex problems with simple code－Enjoy peace of mind**
 
 ## Context
 
-Today, the question is no longer whether an application is concurrent and distributed, but only to what extent an application is concurrent and distributed.
-Today, concurrency and distribution are fundamental aspects of software engineering.
+Today, every application is a concurrent, distributed application. While many popular concurrent programming models have emerged, aiming to improve the developer experience for concurrent applications, no distributed programming models have emerged yet. Distributed Async Await aims to fill that gap.
 
-Multiple popular concurrent programming models have emerged, that is — programming models that elevate concurrency to a first class citizen, aiming to improve building non-distributed, concurrent applications.
-However, no popular concurrent and distributed programming models have emerged yet.
+## Purpose
 
-<DAACallOut
-title="Concurrency and Distribution">
+The purpose of this document is to formalize Distributed Async Await－an open, vendor-neutral specification of a programming model for building modern, concurrent and distributed applications with a delightful developer experience.
 
-Concurrency and distribution are fundamental aspects of software engineering.
-In the context of this specification, concurrency and distribution are charaterized as:
+Do's
 
-**Concurrency**
+- Standard programming model based on Functions and Promises
+- Simply protocols
+- Open ecosystem
 
-The defining charateristic of concurrency is non-determinisitic execution order.
-In a concurrent system, we do not know what happens next.
+Don'ts
 
-**Distribution**
+- No proprietary programming models such as workflows and activities
+- No complex technology stacks
+- No vendor lock-in
 
-The defining charateristic of distribution is non-determinisitic partial failure.
-In a distributed system, we do not know what fails next.
+<DAACallOut title="Developer Experience and Simplicity">
 
-Therefore, by definition, a concurrent and distributed programming model supports _coordination_ to tame non-determinisitic execution order and _recovery_ to tame non-determinisitic partial failure.
-
-</DAACallOut>
-
-## Purpose of the specification
-
-The purpose of this document is to formalize Distributed Async Await－an open, vendor-neutral specification of a programming model based on async await and an underlying scalable and reliable distributed execution model.
-
-Distributed Async Await is a programming model that offers a delightful developer experience for building scalable and reliable distributed systems by making concurrency and distribution first class citizens of the programming model.
-
-<DAACallOut
-title="Developer Experience and Simplicity"
->
-
-Developer experience is often described through two lenses: the subjective lens of developer satisfaction and the objective lens of developer productivity.
-While challenging to define, developer experience remains a critical aspect of software development.
-
-This specification ties developer experience to simplicity.
-We posit that a delightful developer experience emerges from systems that are:
+Developer experience is often described through two lenses: the subjective lens of developer satisfaction and the objective lens of developer productivity. This specification ties developer experience to simplicity. We posit that a delightful developer experience emerges from systems that are:
 
 - Simple to understand
 - Simple to develop
 - Simple to operate
-
-**complex problems, simple code, peace of mind**
 
 </DAACallOut>
 
