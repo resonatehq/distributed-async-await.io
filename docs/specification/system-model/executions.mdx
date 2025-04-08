@@ -1,0 +1,43 @@
+---
+id: executions
+title: Function Executions
+sidebar_label: Executions
+sidebar_position: 3
+---
+
+import { LabeledDiagram } from "@site/src/components/LabeledDiagram/LabeledDiagram";
+
+:::tip Fundamental unit of computation
+
+Executions are the **fundamental unit of computation** in a system.
+
+:::
+
+On an execution level, a system is a collection of executions, each execution has a unique identity.
+An execution has a well-defined lifecycle, represented by the lifecycle events _invoke_ and _return_, that governs its participation in the system:
+
+**_invoke_** marks the initialization of the execution and represents its entry into the system.
+
+**_return_** marks the termination of the execution and represents its exit from the system.
+
+An execution is bound to a single process.
+An execution cannot emit events outside its (_invoke_, _return_) interval.
+As a consequence, an execution cannot be restarted.
+Instead, a new execution must be created that may be considered the logical successor or the logical equivalent of the terminated execution.
+
+<LabeledDiagram>
+  <img src="/img/execution-lifecycle.svg" alt="Execution lifecycle diagram" />
+</LabeledDiagram>
+
+An execution has a well-defined lifecycle, represented by the lifecycle events _invoke_ and _return_, that governs its participation in the system.
+An execution may raise events such as send or receive events only within its (invoke, return).
+
+## Long running executions
+
+The term long running is not a well-defined term in the context of distributed systems.
+This is because "long" is relative.
+
+This system model argues that you should not think about "long" in terms of time.
+Instead, long refers to the potention for a logical execution to span multiple physical locations.
+
+Therefor an execution is long running if it potentially runs across multiple processes.

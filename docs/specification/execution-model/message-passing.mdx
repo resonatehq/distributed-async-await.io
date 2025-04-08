@@ -1,11 +1,15 @@
 ---
 id: message-passing
-title: Message Passing
+title: Message Passing Protocol
 sidebar_label: Message Passing
 sidebar_position: 3
 ---
 
-The Distributed Async Await specification relies on low-level message-passing semantics.
+:::tip Communication between components
+
+The **Message Passing Protocol** defines the communication between components in Distributed Async Await.
+
+:::
 
 The Message-Passing Protocol MUST support a wide array of transport mechanisms such as push or poll over http or message queues.
 Therefore, the specification defines the behavior of sending and receiving messages between processes with minimal requirements and minimal guarantees.
@@ -23,7 +27,7 @@ This ensures that distributed executions can adapt dynamically to changes in the
 
 Invoke-Resume Example: The Canonical Interaction
 
-The canonical interaction in Distributed Async Await involves invoking and awaiting an asynchronous function remotely (see [Distributed Coordination Protocol](#distributed-coordination-protocol)).
+The canonical interaction in Distributed Async Await involves invoking and awaiting an asynchronous function remotely (see [Distributed Coordination Protocol](/specification/execution-model/coordination-protocol)).
 This interaction involves two messages:
 
 **Invoke**

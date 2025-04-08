@@ -176,3 +176,11 @@ pagination-nav__link:hover {
 .navbar__search-input {
   border-radius: 0;
 }
+
+.alert--success {
+  background-color: #ffffff;
+  border-left: 4px solid #3cc9a7;
+  border-right: 4px solid #3cc9a7;
+  border-radius: 0;
+  box-shadow: none !important;
+}

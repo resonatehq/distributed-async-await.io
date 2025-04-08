@@ -6,9 +6,10 @@ sidebar_position: 2
 ---
 
 import { LabeledDiagram } from "@site/src/components/LabeledDiagram/LabeledDiagram";
-import { DAACallOut } from "@site/src/components/DAACallOut/DAACallOut";
 
-<DAACallOut title="Historical context and motivation for Distributed Async Await"></DAACallOut>
+:::tip Historical context and motivation for Distributed Async Await
+
+:::
 
 ### Rise of Concurrency and Distribution
 
@@ -62,9 +63,7 @@ The introduction of _async await_ marked a pivotal advancement: an intuitive, pr
 Async await replaced opaque callback chains with clean, readable logic.
 Rather than writing event-driven code that manually tracked state and control flow, developers could write code that _looked_ sequential but _executed_ asynchronously.
 
-<DAACallOut
-title="Invoke and Await"
->
+:::tip Invoke and Await
 
 ```text
 function foo() {
@@ -104,7 +103,7 @@ An async function execution, the caller, awaits a promise instance and eventuall
 On await (2), (the execution of) foo suspends its execution until (the execution of) bar terminates and completes its associated promise instance.
 On termination of (the execution of) bar and the completion of its associated promise instance, (the execution of) foo resumes its execution.
 
-</DAACallOut>
+:::
 
 But async await, despite its elegance, stopped at the boundary of the process. It was concurrency-focused.
 It had no concept of remote invocation, no facility for distribution, and no notion of recovery across process or machine failures.
@@ -115,9 +114,7 @@ As systems became distributed by necessity, async await revealed its limits.
 Distributed systems are defined by two core properties: _partial order_ and _partial failure_. In concurrent systems, operations may interleave in unpredictable ways.
 In distributed systems, operations may also _fail_ in unpredictable ways.
 
-<DAACallOut
-title="Partial Order and Partial Failure"
->
+:::tip Partial Order and Partial Failure
 
 Consider a simple example, two processes P and Q, each consisting of just three steps.
 
@@ -137,7 +134,7 @@ Q = x • y • z
 The concurrent composition of 2 processes consisting of 3 steps leads to 20 distinct possible executions.
 The distributed composition of 2 processes consisting of 3 steps leads to 69 distinct possible executions.
 
-</DAACallOut>
+:::
 
 To mitigate partial order, we need **coordination**.
 To mitigate partial failure, we need **recovery**.
