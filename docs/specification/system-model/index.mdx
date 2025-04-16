@@ -14,66 +14,7 @@ It defines the rules that govern the behavior of distributed software systems.
 
 :::
 
-## Failure
+import DocCardList from "@theme/DocCardList";
+import { useCurrentSidebarCategory } from "@docusaurus/theme-common";
 
-Distributed Async Await assumes a fail-stop, also called crash-stop, failure model for processes: When a process experiences a failure, the process stops performing any internal or external steps at an arbitrary moment in time and never again performs any further internal or external steps.
-
-This specification assumes a fail-stop, also called crash-stop, failure model for processes: When a process experiences a failure, the process stops performing any internal or external steps at an arbitrary moment in time and never again performs any further internal or external steps.
-Note
-This specification does not make statements about process creation. Specifically, when processes leave the system (e.g. in the event of failures), an external mechanism is responsible to add new processes if necessary.
-
-Distributed Async Await assumes a fail-stop process failure model: A process may non-deterministically terminate. Specifically, upon termination, the process does not raise additional events and therefore cannot announce its termination.
-
-In case of a failure, that is, an unexpected and unwanted termination event, a process is considered crashed. The process cannot be restarted. Instead, a new process must be created that may be considered the logical successor or the logical equivalent of the terminated process.
-
-The notion of logical successor or logical equivalent introduces two distinct levels of reasoning: The logical layer and the physical layer.
-
-Logical Layer
-The logical layer is populated by logical processes. A logical process has a logical id. A logical process is composed of one or more physical processes.
-
-Physical Layer
-The physical layer is populated by logical processes. A physical process has a physical id. One or more physical processes are composed into one logical process.
-
-A logical process can experience additional lifetime events, suspension and resumption: When a physical process terminates, the associated logical process suspends (commonly referred to as a crash). When another physical process initiates, the associated logical process resumes (commonly referred to as restart or recovery.
-
-## Messaging
-
-Messages are sent between processes; consequently, messages are addressed to processes. One (successful) message exchange consists of a send event at the sending process and a receive event at the receiving process.
-
-<LabeledDiagram>
-  <img src="/img/send-receive-event.svg" alt="Send and Receive event diagram" />
-</LabeledDiagram>
-
-The most fine granular model of message exchange between two processes consists of 4 events, a send event at the sending process, a receive event at the network followed by a send event at the network and a receive event at the receiving process. At this level of abstraction, message exchange between processes and the network is reliable, however, the network may reorder, drop, or duplicate messages
-
-The more common model of message exchange between two processes consists of two events, a send event at the sending process and a receive event at the receiving process. At this level of abstraction, message exchange between processes is unreliable, messages may be reordered, dropped, or duplicated.
-
-The only guarantee is that if a process experiences a receive event there is a corresponding send event at a sending process (which may be the same process)
-
-## Concurrency and Distribution
-
-One logical execution consists of multiple concurrent and distributed physical executions, that is, physical executions may execute independently and on different resources.
-
-### Concurrency
-
-The defining characteristic of concurrency is non-deterministic partial order; to mitigate the challenges of partial order we leverage coordination to ensure consistency.
-
-###Distribution
-The defining characteristic of distribution is non-deterministic partial failure; to mitigate the challenges of partial failure we leverage recovery to ensure completion.
-Distribution Across Space
-An execution is distributed across space when the same logical execution spans multiple physical executions concurrently, that is, at the same point in time.
-Distribution Across Time
-An execution is distributed across time when the same logical execution spans multiple physical executions sequentially, that is, at different points in time.
-
-### Physical vs logical
-
-Distributed Async Await makes the distinction between physical executions and logical executions.
-A logical execution can consist of multiple physical executions spanning multiple physical processes.
-For example, logical execution le1 starts as physical execution pe1 on physical process p1. Physical process p1 then experiences a crash failure. Logical execution le1 is then resumed as physical execution pe2 on physical process p2.
-Physical executions never “restart”. Each physical execution is distinct.
-A logical execution can contain many physical executions, each one starting from the beginning and attempting to make progress.
-The logical execution completes when a physical execution reaches the return statement of the function.
-
-3.2.2 Logical execution side effects
-If a logical execution can consist of multiple physical executions, and each physical execution is a completely new function execution that starts from the beginning of the function, then a logical execution is susceptible to duplicate side effects.
-Distributed Async Await uses promises to deduplicate side effects.
+<DocCardList items={useCurrentSidebarCategory().items} />

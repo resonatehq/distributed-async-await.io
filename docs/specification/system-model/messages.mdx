@@ -1,0 +1,29 @@
+---
+id: messages
+title: Messages
+sidebar_label: Messages
+sidebar_position: 4
+---
+
+import { LabeledDiagram } from "@site/src/components/LabeledDiagram/LabeledDiagram";
+
+:::tip Means of communication
+
+Messages are the means by which processes communicate with each other. They are the primary mechanism for exchanging information and coordinating actions in a distributed system.
+
+:::
+
+Messages are sent between processes; consequently, messages are addressed to processes.
+One (successful) message exchange consists of a send event at the sending process and a receive event at the receiving process.
+
+<LabeledDiagram>
+  <img src="/img/send-receive-event.svg" alt="Send and Receive event diagram" />
+</LabeledDiagram>
+
+The most fine granular model of message exchange between two processes consists of 4 events, a send event at the sending process, a receive event at the network followed by a send event at the network and a receive event at the receiving process.
+At this level of abstraction, message exchange between processes and the network is reliable, however, the network may reorder, drop, or duplicate messages
+
+The more common model of message exchange between two processes consists of two events, a send event at the sending process and a receive event at the receiving process.
+At this level of abstraction, message exchange between processes is unreliable, messages may be reordered, dropped, or duplicated.
+
+The only guarantee is that if a process experiences a receive event there is a corresponding send event at a sending process (which may be the same process)
