@@ -39,4 +39,33 @@ The behavior of a process is represented by its trace, a totally ordered sequenc
 Within a process, events are totally ordered.
 However, across processes, events are only partially ordered.
 
-Processes emit events through executions.
+Processes emit events through [executions](/specification/system-model/executions).
+
+## Failure
+
+Distributed Async Await assumes a fail-stop, also called crash-stop, failure model for processes: When a process experiences a failure, the process stops performing any internal or external steps at an arbitrary moment in time and never again performs any further internal or external steps.
+
+This specification assumes a fail-stop, also called crash-stop, failure model for processes: When a process experiences a failure, the process stops performing any internal or external steps at an arbitrary moment in time and never again performs any further internal or external steps.
+
+:::tip process creation
+
+This specification does not make statements about process creation.
+Specifically, when processes leave the system (e.g. in the event of failures), an external mechanism is responsible to add new processes if necessary.
+
+:::
+
+Distributed Async Await assumes a fail-stop process failure model: A process may non-deterministically terminate. Specifically, upon termination, the process does not raise additional events and therefore cannot announce its termination.
+
+In case of a failure, that is, an unexpected and unwanted termination event, a process is considered crashed. The process cannot be restarted. Instead, a new process must be created that may be considered the logical successor or the logical equivalent of the terminated process.
+
+The notion of logical successor or logical equivalent introduces two distinct levels of reasoning: The logical layer and the physical layer.
+
+**Logical Layer**
+
+The logical layer is populated by logical processes. A logical process has a logical id. A logical process is composed of one or more physical processes.
+
+**Physical Layer**
+
+The physical layer is populated by logical processes. A physical process has a physical id. One or more physical processes are composed into one logical process.
+
+A logical process can experience additional lifetime events, suspension and resumption: When a physical process terminates, the associated logical process suspends (commonly referred to as a crash). When another physical process initiates, the associated logical process resumes (commonly referred to as restart or recovery.
