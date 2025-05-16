@@ -39,7 +39,7 @@ Distributed Async Await is a variant of Durable Executions. A _Durable Execution
 
 ### Mechanics
 
-Distributed Async Await durably persists the state of an execution after each step of the execution. In case of an interruption, the system recreates the function execution from the persited state and continues from there.
+Distributed Async Await durably persists the state of an execution after each step of the execution. In case of an interruption, the system recreates the function execution from the persisted state and continues from there.
 
 In traditional, _ephemeral_ async await, the state of a function execution－its control flow and local variables－is stored in ephemeral memory. If the process hosting the function execution crashes, the function execution is lost.
 
