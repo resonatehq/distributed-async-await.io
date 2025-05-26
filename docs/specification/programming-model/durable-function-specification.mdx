@@ -7,7 +7,9 @@ sidebar_position: 1
 
 import { LabeledDiagram } from "@site/src/components/LabeledDiagram/LabeledDiagram";
 
-:::tip
+:::tip Recoverable function executions
+
+Durability is a property of a function execution that allows it to be resumed after an interruption.
 
 :::
 
@@ -17,19 +19,23 @@ A Durable Execution is an programming abstraction with an interruption agnostic 
 
 ### Interruption
 
-The term *interruption* refers to a voluntary (system triggered) or involuntary (environment triggered) termination in mid execution. A voluntary termination is also refered to as an *interrupt*, an involuntary termination is also refered to as a *failure*.
+The term _interruption_ refers to a voluntary (system triggered) or involuntary (environment triggered) termination in mid execution.
+A voluntary termination is also refered to as an _interrupt_, an involuntary termination is also refered to as a _failure_.
 
 ### Interruption-agnostic Definition
 
-The term *interruption agnostic definition* refers to a definition (program, code) that does not acknowledge the possibility of interruptions. In other words, the definition does not contain interruption detection and/or interruption mitigation.
+The term _interruption agnostic definition_ refers to a definition (program, code) that does not acknowledge the possibility of interruptions.
+In other words, the definition does not contain interruption detection and/or interruption mitigation.
 
 ### Interruption-transparent Execution
 
-The term *interruption tolerant execution* refers to an execution that does not externalize (make observable) the presence of interruptions. In other words, an execution that experiences an interruption and subsequently recovers is equivalent to some execution that does not experience an interruption.
+The term _interruption tolerant execution_ refers to an execution that does not externalize (make observable) the presence of interruptions.
+In other words, an execution that experiences an interruption and subsequently recovers is equivalent to some execution that does not experience an interruption.
 
 :::info Interruption Tolerance, defined
 
 Interruption tolerance can be defined formally as:
+
 ```
 (⟨p⟩, →(+interruption)) ≃ (⟨p⟩, →(-interruption))
 ```
