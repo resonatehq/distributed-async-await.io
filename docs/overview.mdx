@@ -29,9 +29,11 @@ async function foo(m : number) {
 
 Just like async await is based on functions and promises, Distributed Async Await is based on _durable functions_ and _durable promises_. Durable Functions and Durable Promises guarantee continuity in case of interruptions.
 
-:::info Durable Executions & Resume Semantics
+:::tip Durable Executions & Resume Semantics
 
-Distributed Async Await is a variant of Durable Executions. A _Durable Execution_ is a function execution that, if the execution is invoked, interrupted, restarted, and completes, is equivalent to some function execution that is invoked and completes. Therefore, Durable Executions provide _resume semantics_ in case of an interruption.
+Distributed Async Await is a variant of Durable Executions.
+A _Durable Execution_ is a function execution that, if the execution is invoked, interrupted, restarted, and completes, is equivalent to some function execution that is invoked and completes.
+Therefore, Durable Executions provide _resume semantics_ in case of an interruption.
 
 ![Durable Executions & Resume Semantics](/img/resume-via-restart.jpg)
 
@@ -39,9 +41,11 @@ Distributed Async Await is a variant of Durable Executions. A _Durable Execution
 
 ### Mechanics
 
-Distributed Async Await durably persists the state of an execution after each step of the execution. In case of an interruption, the system recreates the function execution from the persited state and continues from there.
+Distributed Async Await durably persists the state of an execution after each step of the execution.
+In case of an interruption, the system recreates the function execution from the persited state and continues from there.
 
-In traditional, _ephemeral_ async await, the state of a function execution－its control flow and local variables－is stored in ephemeral memory. If the process hosting the function execution crashes, the function execution is lost.
+In traditional, _ephemeral_ async await, the state of a function execution－its control flow and local variables－is stored in ephemeral memory.
+If the process hosting the function execution crashes, the function execution is lost.
 
 In Distributed Async Await, the state necessary to recreate the function execution is stored in durable memory.
 

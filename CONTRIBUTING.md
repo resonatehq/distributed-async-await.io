@@ -13,3 +13,31 @@ If the proposal is approved, you can submit a Pull Request against the repositor
 The current maintainers will review the PR and may ask for changes.
 
 If the PR is approved, the current maintainers will merge the PR.
+
+## Local preview
+
+The website uses [Docusaurus 2](https://docusaurus.io/), a modern static website generator.
+
+The following steps will serve the website locally.
+
+Install dependencies:
+
+```shell
+npm install
+```
+
+Run the development server:
+
+```shell
+npm run start
+```
+
+## Local build check
+
+The following steps will run a production build check.
+
+Install dependencies:
+
+```
+npm install
+```

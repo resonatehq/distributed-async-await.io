@@ -5,9 +5,12 @@ sidebar_label: Programming Model
 sidebar_position: 3
 ---
 
-# Programming Model
+:::tip Developer interface
 
-Distributed Async Await, like async await, builds on two abstractions, functions and promises. Functions are a universal abstraction for computation, promises are a universal abstraction for coordination.
+Distributed Async Await, like async await, builds on two abstractions, functions and promises.
+Functions are a universal abstraction for computation, promises are a universal abstraction for coordination.
+
+:::
 
 ## Async Await
 
@@ -16,29 +19,151 @@ Distributed Async Await, like async await, builds on two abstractions, functions
 - Combines invocation and synchronization.
 - Only one function execution enabled at one time.
 
-In a traditional programming model, when a function (the *caller*) invokes another function (the *callee*), the callee begins and the caller suspends until the callee returns. Upon return, the caller resume execution with the return value of the callee. Executions proceed sequentially, that is, at any point in time exactly one execution may take a step.
+In a traditional programming model, when a function (the _caller_) invokes another function (the _callee_), the callee begins and the caller suspends until the callee returns.
+Upon return, the caller resumes execution with the return value of the callee.
+Executions proceed sequentially, that is, at any point in time exactly one execution may take a step.
 
 ### Concurrent Programming
 
 - Seperates invocation and synchronization.
 - More than one function execution enabled at one time.
 
-In async await, when the caller invokes the callee, the callee begins and the caller continues execution with a promise representing the callee. When the caller requires the return value of the callee, the caller awaits the promise suspending execution until the callee returns, at which point the caller resumes with the return value of the callee. Executions proceed concurrently, that is, at any point in time more than one execution may take a step.
+In async await, when the caller invokes the callee, the callee begins and the caller continues execution with a promise representing the callee.
+When the caller requires the return value of the callee, the caller awaits the promise suspending execution until the callee returns, at which point the caller resumes with the return value of the callee.
+Executions proceed concurrently, that is, at any point in time more than one execution may take a step.
 
 ### The role of promises
 
-Promises are a universal abstraction for coordination. They allow callers and callees to execute concurrently while still enabling the caller to coordinate by awaiting the completion and receiving the return value of the callee.
+Promises are a universal abstraction for coordination.
+They allow callers and callees to execute concurrently while still enabling the caller to coordinate by awaiting the completion and receiving the return value of the callee.
 
-![Execution locality](/img/sequential-vs-concurrent.png)
+![Execution locality of sequential vs concurrent](/img/traditional-vs-async-await.svg)
 
 ## Distributed Async Await
 
-Distributed Async Await extends async await to a concurrent and distributed programming model: Like async await, Distributed Async Await is based on functions and promises but adds Distributed Coordination and Distributed Recovery
+Distributed Async Await extends async await to a concurrent and distributed programming model: Like async await, Distributed Async Await is based on functions and promises but adds Distributed Coordination and Distributed Recovery.
 
 ### Distributed Coordination
 
-Distributed Async Await allows callers to invoke and await callees across processes. Promises are no longer local objects. Promises coordinate across the network, enabling the familiar semantics of Async Await to span across systems.
+Distributed Async Await allows callers to invoke and await callees across processes.
+Promises are no longer local objects. Promises coordinate across the network, enabling the familiar semantics of Async Await to span across systems.
 
 ### Distributed Recovery
 
 Distributed Async Await defines recovery semantics in case of a process interruption.
+
+## Call Graphs
+
+:::tip Visualizing Distributed Async Await
+
+Call Graphs are a powerful tool for visualizing the execution of a program.
+
+:::
+
+A Call Graph is a directed graph where the nodes are functions and the edges are calls between functions.
+
+:::tip Developer interface
+
+The Programming Model defines the developer interface of Distributed Async Await, and how to provide a sequential looking programming model on top of a distributed and concurrent platform.
+
+:::
+
+Distributed Async Await, like _async/await_, builds on two abstractions, functions and promises.
+Functions are a universal abstraction for computation, promises are a universal abstraction for coordination.
+
+Functions compose recursively, that is, a function may call other functions spanning a Call Graph.
+The Call Graph provides a flexible lens onto a computation.
+The call graph is zoomable, allowing one to expand a caller into its callees, treating a function as a composite, or collapse those callees into the caller, treating the function as atomic.
+This flexibility enables reasoning at different levels of abstraction.
+
+import { LabeledDiagram } from "@site/src/components/LabeledDiagram/LabeledDiagram";
+
+Generically, a Call Graph is a directed graph where the nodes are functions and the edges are calls between functions.
+
+<LabeledDiagram>
+  <img src="/img/generic-call-graph.svg" alt="Generic Call Graph" />
+</LabeledDiagram>
+
+Within the context of the Distributed Async Await specification, and all implementations of it, a Call Graph is the full set of promises and executions from ephemeral edge to ephemeral edge.
+That is — a Call Graph is a map of the durable world.
+
+In the Distributed Async Await specification, all execution invocations pair with a promise.
+
+<LabeledDiagram>
+  <img src="/img/promise-execution-pairs.svg" alt="Promise execution pair" />
+</LabeledDiagram>
+
+An execution can be either a function execution or some action that must be taken outside of the system, such as a human clicking a button.
+
+![Promise execution promise action pairs](/img/promise-execution-promise-action-pairs.svg)
+
+A Call Graph can illustrate locality — that is, an execution can display its locality in relation to other executions.
+This is called a Distributed Call Graph.
+
+![Execution locality](/img/execution-locality.svg)
+
+A Call Graph is zoomable — that is, it can show the full set of promises and executions, or it can show just the root executions.
+Consider the following pseudo-code, where `foo()` and `bar()` are in process a, and `baz()` is in process b.
+
+process a:
+
+```text
+func foo():
+    r = await (async_local bar())
+    return r
+
+func bar():
+    r = await (async_remote baz())
+    return r
+```
+
+process b:
+
+```text
+func baz():
+    return 1
+```
+
+If the Call Graph zooms in on all the promises, function executions, and localities (details, concurrency, and distribution), it would look like this:
+
+![Detailed distributed concurrent Call Graph](/img/detailed-distributed-concurrent-call-graph.svg)
+
+This same call structure can assume promises and the Call Graph can just show the function executions.
+
+![Detailed distributed concurrent Call Graph](/img/distributed-concurrent-call-graph.svg)
+
+To show just the distributed nature of the application, we can zoom out and show just the root executions of each process.
+
+![Distributed Call Graph](/img/distributed-call-graph.svg)
+
+## Local and Remote
+
+When a function calls another function within the same process it is called a Local Function Invocation (LFI).
+
+{/* ![Diagram of an LFI Call Graph](/img/lfc-call-graph.svg) */}
+
+When a function calls another function in a different Application Node, it is considered a Remote Function Invocation (RFI).
+
+{/* ![Diagram of an RFI Call Graph](/img/rfc-call-graph.svg) */}
+
+A Resonate Application can make use of both LFIs and RFIs, and thus a Resoante Call Graph can span just one or many Application Nodes.
+
+{/* ![Diagram of a Resonate Call Graph spanning multiple Application Nodes](/img/complex-rfc-call-graph.svg) */}
+
+## Root promises
+
+There are two types of root promises.
+The first is the root promise of an Application Node (process), and the second is the root promise of a Call Graph.
+
+An Application Node root promise (also known as the process) is the promise associated with the first execution in an Application Node.
+In other words, this is the execution invoked by `resonate.run()`.
+
+A Call Graph root promise is the promise associated with the first execution in a Call Graph.
+This execution is also invoked by `resonate.run()`, but it is on the "edge" and is typically the entry point into the application.
+
+{/* ![Diagram of a Resonate Call Graph with labeled root promises](/img/labeled-complex-rfc-call-graph.svg) */}
+
+import DocCardList from "@theme/DocCardList";
+import { useCurrentSidebarCategory } from "@docusaurus/theme-common";
+
+<DocCardList items={useCurrentSidebarCategory().items} />
