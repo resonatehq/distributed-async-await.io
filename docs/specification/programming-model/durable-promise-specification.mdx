@@ -16,7 +16,7 @@ Distributed Async Await proposes Durable Promises — that is, promises that per
 
 Within the Distributed Async Await specification, each execution, whether that is a function execution or an action taking place in the physical world, pairs to a promise.
 
-Distributed Async Await requires that promise data objects are stored to disk, thus making the promises durable, and giving them the name Durable Promises.
+Distributed Async Await requires that promise data objects are stored to disk, thus making the promises durable, giving them the name Durable Promises.
 
 A promise, also called future, awaitable, or deferred is a representation of a future value.
 A promise is either pending or completed, that is, resolved or rejected: A promise is pending, signaling that the value is not yet available or completed, signaling success or failure.
@@ -31,7 +31,7 @@ On completion, the downstream execution resumes with the value of the promise.
 
 **Durable Promise Application Programming Interface**
 
-Logically, the Application Programming Interface (API) is divided in two parts, the Downstream API and the Upstream API.
+Logically, the Application Programming Interface (API) is divided into two parts, the Downstream API and the Upstream API.
 
 <LabeledDiagram>
   <img src="/img/promise-api-illustration.svg" alt="Promise API illustration" />
