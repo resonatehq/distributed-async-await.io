@@ -130,16 +130,14 @@ const config: Config = {
       },
       items: [
         {
-          to: "https://resonatehqio.substack.com/",
+          to: "https://resonatehqio.substack.com",
           html: '<i class="bx bx-md bx-pen"></i> journal',
           position: "right",
-          target: "_self",
         },
         {
-          to: "https://resonatehqio.substack.com/",
+          to: "https://resonatehq.io/rsvp",
           html: '<i class="bx bx-md bx-calendar-event"></i> rsvp',
           position: "right",
-          target: "_self",
         },
         {
           href: "https://resonatehq.io/discord",
@@ -147,7 +145,7 @@ const config: Config = {
           position: "right",
         },
         {
-          href: "https://github.com/resonatehq/resonate",
+          href: "https://github.com/resonatehq",
           html: '<i class="bx bx-md bxl-github"></i> github',
           position: "right",
         },
