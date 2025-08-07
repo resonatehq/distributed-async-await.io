@@ -48,7 +48,7 @@ article {
 
 article a {
   text-decoration: underline;
-  color: #3cc9a7;
+  color: #f98c39;
   font-weight: 400;
 }
 
@@ -84,12 +84,12 @@ article a {
 }
 
 .menu__link:hover {
-  color: #3cc9a7 !important;
+  color: #f98c39 !important;
 }
 
 .menu__link--active,
 .table-of-contents__link--active {
-  color: #3cc9a7 !important;
+  color: #f98c39 !important;
 }
 
 .menu__caret {
@@ -113,7 +113,7 @@ article a {
 }
 
 .navbar__link:hover {
-  color: #3cc9a7 !important;
+  color: #f98c39 !important;
 }
 
 .navbar__link i,
@@ -156,7 +156,7 @@ article a {
 }
 
 pagination-nav__link:hover {
-  border-color: #3cc9a7 !important;
+  border-color: #f98c39 !important;
 }
 
 .card {
@@ -170,17 +170,16 @@ pagination-nav__link:hover {
 }
 
 .card:hover {
-  border-color: #3cc9a7 !important;
+  border-color: #f98c39 !important;
 }
 
 .navbar__search-input {
   border-radius: 0;
 }
 
-.alert--success {
-  background-color: #ffffff;
-  border-left: 4px solid #3cc9a7;
-  border-right: 4px solid #3cc9a7;
+.alert--info {
+  background-color: #ffe1c9;
+  border-left: 4px solid #f98c39;
   border-radius: 0;
   box-shadow: none !important;
 }

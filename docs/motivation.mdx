@@ -7,7 +7,7 @@ sidebar_position: 3
 
 import { LabeledDiagram } from "@site/src/components/LabeledDiagram/LabeledDiagram";
 
-:::tip Historical context and motivation for Distributed Async Await
+:::info Historical context and motivation for Distributed Async Await
 
 :::
 
@@ -63,7 +63,7 @@ The introduction of _async await_ marked a pivotal advancement: an intuitive, pr
 Async await replaced opaque callback chains with clean, readable logic.
 Rather than writing event-driven code that manually tracked state and control flow, developers could write code that _looked_ sequential but _executed_ asynchronously.
 
-:::tip Invoke and Await
+:::info Invoke and Await
 
 ```text
 function foo() {
@@ -114,7 +114,7 @@ As systems became distributed by necessity, async await revealed its limits.
 Distributed systems are defined by two core properties: _partial order_ and _partial failure_. In concurrent systems, operations may interleave in unpredictable ways.
 In distributed systems, operations may also _fail_ in unpredictable ways.
 
-:::tip Partial Order and Partial Failure
+:::info Partial Order and Partial Failure
 
 Consider a simple example, two processes P and Q, each consisting of just three steps.
 

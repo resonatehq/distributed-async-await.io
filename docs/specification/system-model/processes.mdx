@@ -7,7 +7,7 @@ sidebar_position: 2
 
 import { LabeledDiagram } from "@site/src/components/LabeledDiagram/LabeledDiagram";
 
-:::tip Fundamental unit of locality
+:::info Fundamental unit of locality
 
 Processes are the **fundamental unit of locality** in a system.
 
@@ -47,7 +47,7 @@ Distributed Async Await assumes a fail-stop, also called crash-stop, failure mod
 
 This specification assumes a fail-stop, also called crash-stop, failure model for processes: When a process experiences a failure, the process stops performing any internal or external steps at an arbitrary moment in time and never again performs any further internal or external steps.
 
-:::tip process creation
+:::info process creation
 
 This specification does not make statements about process creation.
 Specifically, when processes leave the system (e.g. in the event of failures), an external mechanism is responsible to add new processes if necessary.
