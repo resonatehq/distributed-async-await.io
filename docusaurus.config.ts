@@ -41,7 +41,7 @@ const config: Config = {
           showLastUpdateTime: true,
           showLastUpdateAuthor: true,
           breadcrumbs: true,
-          exclude: ["**/code/**"],
+          exclude: ["**/code/**", "motivation.mdx"],
         },
         blog: false,
         theme: {
@@ -104,17 +104,23 @@ const config: Config = {
   ],
 
   themeConfig: {
+    announcementBar: {
+      id: 'resonate',
+      content: 'Distributed Async Await is actively developed by <a href="https://resonatehq.io" target="_blank" rel="noopener noreferrer">Resonate HQ</a>',
+      isCloseable: false,
+    },
     image: "img/echo.png", // used for link previews
     colorMode: {
-      defaultMode: "light",
-      disableSwitch: true,
-      respectPrefersColorScheme: false,
+      // defaultMode: "light",
+      // disableSwitch: true,
+      respectPrefersColorScheme: true,
     },
     navbar: {
       title: "Distributed Async Await",
       logo: {
         alt: "Distributed Async Await logo",
-        src: "img/daa-logo.png",
+        src: "img/daa-logo-light.png",
+        srcDark: "img/daa-logo-dark.png",
         href: "/",
         target: "_self",
       },

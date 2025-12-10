@@ -5,16 +5,24 @@ sidebar_label: Overview
 sidebar_position: 2
 ---
 
-:::info Extending async await
+## Distributed Systems
 
-Distributed Async Await is a programming model based on async await that offers a simple, delightful developer experience for building modern, concurrent and distributed applications.
+A distributed system is a set of concurrent, communicating components that communicate by exchanging messages over a network. Each component has access to its own state but cannot access the state of other components.
 
-:::
+![A Distributed System](/img/distributed-system.svg)
 
-## Durable Functions and Durable Promises
+## Distributed Execution
+
+A (function) execution is recursively composed of other (function) executions, often called steps.
+
+ A distributed execution is an execution distributed across the components of a distributed system, where each component performs a portion of the execution.
+
+![A Distributed Execution](/img/distributed-execution.svg)
+
+## Functions and Promises
 
 ```js
-async function foo(m : number) {
+function* foo(context : Context, m : number) {
   let r = 0;
   for(let i = 0; i < m; i++) {
     // remotely invoke bar
