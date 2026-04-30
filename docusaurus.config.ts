@@ -3,7 +3,7 @@ import type * as Preset from "@docusaurus/preset-classic";
 
 const config: Config = {
   title: "Distributed Async Await",
-  tagline: "Specification for a holistic cloud programming model.",
+  tagline: "An open specification for durable promises across processes, machines, and time.",
   favicon: "img/daa-logo.png",
 
   // Set the production url of your site here

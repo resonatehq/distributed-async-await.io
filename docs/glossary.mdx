@@ -7,13 +7,15 @@ sidebar_position: 99
 
 ### Agent
 
-See Process
+A program that generates and executes code on behalf of a user — including, increasingly, code that calls Distributed Async Await APIs. From the perspective of the protocol, an agent is just another process. See [Process](#process).
 
 ### Async Await
 
 Async Await is a programming model based on functions and promises that allows for concurrent execution of code within a single process.
 
 ### Async Call Graph
+
+An [Async Call Graph](#call-graph) in which the edges represent asynchronous invocations — that is, the caller continues executing concurrently with the callee, and the caller awaits a promise to receive the callee's result.
 
 ### Call Graph
 
@@ -25,15 +27,19 @@ See also:
 
 ### Concurrency
 
+The property of a system in which multiple executions may take a step at the same point in time. Concurrency introduces *partial order* — non-deterministic interleaving of steps across executions. See also [Coordination](#coordination).
+
 ### Coordination
+
+The mechanism by which concurrent executions agree on a partial order of operations. In Distributed Async Await, coordination is provided by [Promises](#promise) — a caller and callee execute concurrently, and the caller awaits a promise to receive the callee's result. See also [Concurrency](#concurrency).
 
 ### Definition
 
-See also
-
-- [Execution](#execution)
+The static description of a computation — the program text. A definition becomes an [Execution](#execution) when it is invoked. See also [Execution](#execution).
 
 ### Distribution
+
+The property of a system in which executions span multiple [Processes](#process), each with its own state and its own potential for [Failure](#interruption). Distribution introduces *partial failure* — non-deterministic termination of a subset of processes. See also [Recovery](#recovery).
 
 ### Durable Executions
 
@@ -41,11 +47,11 @@ A Durable Execution is a programming abstraction with an interruption agnostic d
 
 ### Execution
 
-See also
-
-- [Definition](#definition)
+The dynamic instance of a [Definition](#definition) — the running program, with all its in-flight state. An execution has a well-defined lifecycle: *invoke* (entry) and *return* (exit). See also [Definition](#definition).
 
 ### Function
+
+A unit of computation defined by its inputs, its outputs, and its body. In Distributed Async Await, functions compose recursively — a function may call other functions, spanning a [Call Graph](#call-graph). Together with [Promises](#promise), functions are one of two universal abstractions on which the programming model is built.
 
 ### Interruption
 
@@ -53,15 +59,23 @@ The term _interruption_ refers to a voluntary (system triggered) or involuntary 
 
 ### Interruption-agnostic
 
+A property of a [Definition](#definition): the definition (program, code) does not contain interruption detection or interruption mitigation logic. The author writes ordinary, synchronous-looking code; the protocol takes responsibility for handling interruptions transparently.
+
 ### Interruption-tolerant
 
+A property of an [Execution](#execution): an execution that experiences an interruption and subsequently recovers is equivalent to some execution that does not experience an interruption. Formally, `(⟨p⟩, →(+interruption)) ≃ (⟨p⟩, →(-interruption))`. See the [Durable Function Specification](/specification/programming-model/durable-function-specification) for the formal treatment.
+
 ### Logical Process
+
+A [Process](#process) identified by its logical identity — what the system reasons *about*. One logical process is realized by one or more [Physical Processes](#physical-process) over time; when a physical process crashes, the logical process suspends, and a successor physical process resumes it.
 
 ### Messages
 
 Messages are the means by which processes communicate with each other.
 
 ### Physical Process
+
+A concrete OS-level process that runs on a specific machine for a finite lifetime. A physical process realizes a [Logical Process](#logical-process); a single logical process may be realized by a sequence of physical processes across crashes and restarts.
 
 ### Process
 
@@ -74,6 +88,12 @@ See also
 
 ### Programming Model
 
+The developer-facing surface of a system: the abstractions that authors compose to express computation. Distributed Async Await's programming model is built on [Functions](#function) and [Promises](#promise) — the same primitives as ordinary async/await, lifted to span [Distribution](#distribution).
+
 ### Promise
 
+A representation of a future value. A promise is either *pending* or *completed*; a completed promise is either *resolved* (success) or *rejected* (failure). Promises are the universal abstraction for [Coordination](#coordination) — a caller awaits a promise to receive a callee's result. In Distributed Async Await, promises are *durable*: they persist independently of the processes that reference them. See the [Durable Promise Specification](/specification/programming-model/durable-promise-specification) for the formal API and state-transition table.
+
 ### Recovery
+
+The mechanism by which a [Logical Process](#logical-process) survives the [Failure](#interruption) of a [Physical Process](#physical-process). Recovery is the response to *partial failure*, just as [Coordination](#coordination) is the response to *partial order*. See the [Recovery Protocol](/specification/execution-model/recovery-protocol) for details.

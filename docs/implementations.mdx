@@ -1,0 +1,45 @@
+---
+id: implementations
+title: Implementations
+sidebar_label: Implementations
+sidebar_position: 4
+---
+
+:::info Reference implementations of this specification
+
+Distributed Async Await is a vendor-neutral specification. The implementations below realize the protocol — and are the easiest way to see the spec running in code.
+
+:::
+
+## Resonate
+
+[Resonate](https://resonatehq.io) is the open-source reference implementation of Distributed Async Await. It is built around an envelope protocol and a server that keeps durable promise state, with language SDKs that express the [Programming Model](/specification/programming-model) idiomatically.
+
+| Component | Repository | Notes |
+|---|---|---|
+| Server | [resonatehq/resonate](https://github.com/resonatehq/resonate) | Implements the [Durable Promise Specification](/specification/programming-model/durable-promise-specification) state machine and the [Coordination](/specification/execution-model/coordination-protocol) + [Recovery](/specification/execution-model/recovery-protocol) protocols. |
+| TypeScript SDK | [resonatehq/resonate-sdk-ts](https://github.com/resonatehq/resonate-sdk-ts) | `@resonatehq/sdk` on npm. Generator-based; zero runtime dependencies. |
+| Python SDK | [resonatehq/resonate-sdk-py](https://github.com/resonatehq/resonate-sdk-py) | `resonate-sdk` on PyPI. |
+| Rust SDK | [resonatehq/resonate-sdk-rs](https://github.com/resonatehq/resonate-sdk-rs) | `resonate` crate. |
+
+### Mapping spec pseudo-code to SDK calls
+
+The specification uses pseudo-code (`async_local`, `async_remote`, `async_r`) to describe invocations. Reference implementations expose the same semantics through their own idioms:
+
+| Spec pseudo-code | TypeScript | Python | Rust |
+|---|---|---|---|
+| `async_local f(args)` | `yield* ctx.run(f, args)` | `yield ctx.run(f, args)` | `ctx.run(f, args).await` |
+| `async_remote f(args)` | `yield* ctx.beginRpc(f, args)` | `yield ctx.beginRpc(f, args)` | `ctx.begin_rpc(f, args).await` |
+| Application root | `await resonate.run(id, fn, ...)` | `resonate.run(id, fn, ...)` | `resonate.run(id, fn, ...).await` |
+
+For the full per-language reference, see the [Resonate documentation](https://docs.resonatehq.io/develop).
+
+## Adding an implementation
+
+Distributed Async Await is open. If you build (or are building) an implementation, open a PR against [resonatehq/distributed-async-await.io](https://github.com/resonatehq/distributed-async-await.io) to add it here.
+
+The minimum bar for inclusion is:
+
+- Implements the [Durable Promise Specification](/specification/programming-model/durable-promise-specification) state-transition table
+- Implements (or is on a path to implement) the [Coordination Protocol](/specification/execution-model/coordination-protocol)
+- Open source with an OSI-approved license
