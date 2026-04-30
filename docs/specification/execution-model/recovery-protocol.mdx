@@ -11,6 +11,50 @@ The **Distributed Recovery Protocol** is responsible for the detection and recov
 
 :::
 
-_This document is a work in progress.
-It is not yet complete, and it may change in the future.
-Please check back later for updates._
+:::warning Specification in progress
+
+A formal sequence-diagram treatment of the Recovery Protocol — analogous to the [Coordination Protocol](/specification/execution-model/coordination-protocol) — is in progress. This page captures the principles the protocol operationalizes; the formal protocol description will land in a future revision.
+
+:::
+
+## What recovery means
+
+Recovery is the mechanism by which a [logical execution](/specification/system-model/executions) survives the [failure](/specification/system-model/processes#failure) of a physical process. Distributed Async Await assumes a fail-stop process failure model: a process may non-deterministically terminate without warning. When that happens, the logical execution suspends and a successor physical execution can resume the work.
+
+Recovery is the second of the two foundational protocols in Distributed Async Await:
+
+- The [Coordination Protocol](/specification/execution-model/coordination-protocol) ensures coordination across **partial order** — the non-deterministic interleaving inherent to concurrent systems.
+- The Recovery Protocol ensures recovery across **partial failure** — the non-deterministic termination inherent to distributed systems.
+
+## Where the load-bearing pieces live
+
+The recovery semantics described informally elsewhere in this specification rest on three load-bearing pieces:
+
+1. **Durable Promises persist execution state.** The state required to recreate a function execution is stored externally to any single process. See the [Durable Promise Specification](/specification/programming-model/durable-promise-specification) for the API + state-transition table.
+
+2. **Function executions are interruption-tolerant.** Re-running a durable function from the beginning, with deduplication via durable promises, converges to the same result as an uninterrupted execution. See the [Durable Function Specification](/specification/programming-model/durable-function-specification) for the formal definition of interruption tolerance.
+
+3. **Tasks claim work and report liveness.** Workers claim tasks from the durable system, heartbeat to indicate progress, and surrender claims on crash. The server uses heartbeat absence to detect failure and re-deliver invocations to a successor worker.
+
+## Properties the protocol must guarantee
+
+A Recovery Protocol implementation must satisfy:
+
+- **Liveness under failure.** A logical execution's progress is bounded by the availability of *some* worker, not any specific worker. If a worker crashes, a successor worker must be able to resume.
+
+- **Safety under recovery.** A re-invoked durable function must not externalize observable side effects twice. Side-effect deduplication is provided by the durable promises representing each step.
+
+- **Bounded re-execution.** A worker that has lost the ability to make progress (lost network, paused VM) must yield its task claim within a bounded time so a successor worker can take over without indefinite waiting.
+
+## Reference implementation pointers
+
+For implementation-level recovery semantics, see:
+
+- [The concepts that power Resonate](https://docs.resonatehq.io/evaluate/why-resonate) — recovery in the context of a working durable execution engine
+- [Implementations](/implementations) — how each language SDK realizes recovery on top of this specification
+
+## See also
+
+- [Coordination Protocol](/specification/execution-model/coordination-protocol) — the sibling protocol covering partial order
+- [Message Passing Protocol](/specification/execution-model/message-passing) — the underlying transport layer
+- [Processes](/specification/system-model/processes) — the failure model assumed by recovery

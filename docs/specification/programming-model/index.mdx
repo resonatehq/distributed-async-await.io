@@ -105,6 +105,12 @@ This is called a Distributed Call Graph.
 A Call Graph is zoomable — that is, it can show the full set of promises and executions, or it can show just the root executions.
 Consider the following pseudo-code, where `foo()` and `bar()` are in process a, and `baz()` is in process b.
 
+:::info Spec pseudo-code, not API
+
+The notation `async_local` / `async_remote` (and `async_r` used elsewhere in this specification) is **pseudo-code chosen for the spec**. It is not the surface API of any implementation. Reference implementations expose the same semantics through their own idioms — for example, `yield* ctx.run(fn)` for local invocation and `yield* ctx.beginRpc(fn, args)` for remote invocation in the TypeScript SDK. See [Implementations](/implementations) for the mapping per language.
+
+:::
+
 process a:
 
 ```text
@@ -140,15 +146,9 @@ To show just the distributed nature of the application, we can zoom out and show
 
 When a function calls another function within the same process it is called a Local Function Invocation (LFI).
 
-{/* ![Diagram of an LFI Call Graph](/img/lfc-call-graph.svg) */}
-
 When a function calls another function in a different Application Node, it is considered a Remote Function Invocation (RFI).
 
-{/* ![Diagram of an RFI Call Graph](/img/rfc-call-graph.svg) */}
-
-A Resonate Application can make use of both LFIs and RFIs, and thus a Resoante Call Graph can span just one or many Application Nodes.
-
-{/* ![Diagram of a Resonate Call Graph spanning multiple Application Nodes](/img/complex-rfc-call-graph.svg) */}
+An Application can make use of both LFIs and RFIs, and thus a Call Graph can span just one or many Application Nodes.
 
 ## Root promises
 
@@ -160,8 +160,6 @@ In other words, this is the execution invoked by `resonate.run()`.
 
 A Call Graph root promise is the promise associated with the first execution in a Call Graph.
 This execution is also invoked by `resonate.run()`, but it is on the "edge" and is typically the entry point into the application.
-
-{/* ![Diagram of a Resonate Call Graph with labeled root promises](/img/labeled-complex-rfc-call-graph.svg) */}
 
 import DocCardList from "@theme/DocCardList";
 import { useCurrentSidebarCategory } from "@docusaurus/theme-common";

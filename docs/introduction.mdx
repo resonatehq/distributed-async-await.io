@@ -5,24 +5,23 @@ title: Distributed Async Await
 description: Distributed Async Await
 sidebar_label: Introduction
 sidebar_position: 1
-last_update:
-  date: "03-21-2025"
 ---
 
 # Distributed Async Await
 ## Suspend Anytime, Resume Anywhere
-#### 
+####
 
-_This is an open, vendor-neutral specification of Distributed Async Await, a durable execution framework based on async await._
+_This is an open, vendor-neutral specification of Distributed Async Await: a durable execution programming model based on functions and promises._
 
-- _Based on Functions and Promises_
-- _Simple to understand_
-- _Simple to develop_
-- _Simple to operate_
+- _Standard programming model — async/await extended to span processes, machines, and time_
+- _Open ecosystem — language- and transport-agnostic, no vendor lock-in_
+- _Designed to be read and written by humans and AI alike_
 
 ## Context
 
-The purpose of this document is to formalize Distributed Async Await, an open, vendor-neutral specification of a durable execution framework.
+The purpose of this document is to formalize Distributed Async Await, an open, vendor-neutral specification of a durable execution programming model.
+
+Software is increasingly written by both human developers and AI agents. The protocol described here is designed to be a contract that either can rely on: a small, formal surface that turns the messy realities of distributed execution — partial order, partial failure, suspension, recovery — into a programming model that reads as ordinary code.
 
 Do's
 
@@ -36,9 +35,9 @@ Don'ts
 - No complex technology stacks
 - No vendor lock-in
 
-:::info Developer Experience and Simplicity
+:::info Simplicity is the contract
 
-Developer experience is often described through two lenses: the subjective lens of developer satisfaction and the objective lens of developer productivity. This specification ties developer experience to simplicity. We posit that a delightful developer experience emerges from systems that are:
+A delightful developer experience — for humans writing code, and for agents generating it — emerges from a system that is:
 
 - Simple to understand
 - Simple to develop
@@ -48,8 +47,12 @@ Developer experience is often described through two lenses: the subjective lens 
 
 ## Structure of the specification
 
-This specification consits of three prescriptive parts:
+This specification consists of three prescriptive parts:
 
 1. Specification of the [programming model](/specification/programming-model)
 2. Specification of the [execution model](/specification/execution-model)
 3. Specification of the [system model](/specification/system-model)
+
+## Reference implementations
+
+See [Implementations](/implementations) for open-source implementations of this specification.
