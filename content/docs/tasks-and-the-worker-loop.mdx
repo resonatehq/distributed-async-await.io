@@ -1,0 +1,20 @@
+---
+title: "Tasks and the worker loop"
+description: "How a worker claims work, holds a lease, heartbeats, and returns results — the loop at the center of every SDK."
+---
+
+# Tasks and the worker loop
+
+<Callout type="caution" title="Chapter in progress">
+This chapter is being written. The outline below is what it will cover. Until it lands, the
+[specification](https://docs.resonatehq.io/spec) and the reference SDKs ([TypeScript](https://github.com/resonatehq/resonate-sdk-ts),
+[Python](https://github.com/resonatehq/resonate-sdk-py), [Rust](https://github.com/resonatehq/resonate-sdk-rs)) are the source of truth.
+</Callout>
+
+## What this chapter covers
+
+- Claiming a task and what the claim grants you
+- Leases, heartbeats, and TTL — keeping a claim alive
+- Executing the claimed work and reporting completion
+- Losing a lease, and why that must be safe
+- Structuring the loop for your concurrency model

@@ -1,0 +1,20 @@
+---
+title: "The protocol at a glance"
+description: "The moving parts you will implement — promises, tasks, messages, and the loop that ties them together — named once so later chapters can use them."
+---
+
+# The protocol at a glance
+
+<Callout type="caution" title="Chapter in progress">
+This chapter is being written. The outline below is what it will cover. Until it lands, the
+[specification](https://docs.resonatehq.io/spec) and the reference SDKs ([TypeScript](https://github.com/resonatehq/resonate-sdk-ts),
+[Python](https://github.com/resonatehq/resonate-sdk-py), [Rust](https://github.com/resonatehq/resonate-sdk-rs)) are the source of truth.
+</Callout>
+
+## What this chapter covers
+
+- The durable promise as the unit of truth, and its state machine
+- Tasks, leases, and how the server hands work to a worker
+- The wire envelope and the message model
+- The worker loop, end to end, at a glance
+- Protocol versioning and what stays stable across SDK releases

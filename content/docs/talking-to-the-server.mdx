@@ -1,0 +1,20 @@
+---
+title: "Talking to the server"
+description: "The transport layer: connecting to a Resonate server, the request/response envelope, and the read/write operations every SDK needs first."
+---
+
+# Talking to the server
+
+<Callout type="caution" title="Chapter in progress">
+This chapter is being written. The outline below is what it will cover. Until it lands, the
+[specification](https://docs.resonatehq.io/spec) and the reference SDKs ([TypeScript](https://github.com/resonatehq/resonate-sdk-ts),
+[Python](https://github.com/resonatehq/resonate-sdk-py), [Rust](https://github.com/resonatehq/resonate-sdk-rs)) are the source of truth.
+</Callout>
+
+## What this chapter covers
+
+- The HTTP surface and the `{kind, head, data}` envelope
+- Creating, reading, and searching promises
+- Status codes and what each one means for the client
+- Connection lifecycle, transport retries, and backoff
+- A minimal client you can build the rest of the SDK on

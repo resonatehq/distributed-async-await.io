@@ -1,16 +1,33 @@
-# Distributed Async Await specification
+# distributed-async-await.io
 
-A holistic approach to enabling reliability, scalability, and delightful developer experiences for any programming langauge being used to build distributed applications.
+The **SDK author's handbook** for [Resonate](https://www.resonatehq.io) — how to build a Resonate SDK
+that implements the Distributed Async Await protocol in any language.
 
-## About this repo
+This site is the implementer-facing companion to the two other Resonate documentation surfaces:
 
-This repository serves as the source of truth for the Distributed Async Await specification.
+- **[docs.resonatehq.io](https://docs.resonatehq.io)** — how to *use* Resonate (adopter docs + SDK guides).
+- **[docs.resonatehq.io/spec](https://docs.resonatehq.io/spec)** — the formal Distributed Async Await
+  specification (the protocol, definitions, and models).
+- **distributed-async-await.io** (this repo) — how to *build* an SDK against that spec.
 
-It serves the specification to distributed-async-await.io
+The seam: the spec tells you what wire bytes to produce; this handbook teaches you how to turn those
+bytes into an idiomatic library someone wants to use.
 
-- [Contribute to the Distributed Async Await specification](./CONTRIBUTING.md).
-- [License](./LICENSE)
+## Stack
 
-## Resonate
+Next.js 15 + [Fumadocs](https://fumadocs.dev) 15, MDX content, Tailwind, deployed on Vercel. The
+scaffold and brand tokens are shared with `docs.resonatehq.io`; the handbook leans the ember accent
+to differentiate from the teal-leaning spec.
 
-Resonate is an implementation of the Distributed Async Await specification — [Learn more](https://docs.resonatehq.io)
+## Develop
+
+```bash
+npm install
+npm run dev          # http://localhost:3000
+npm run build        # next build + llms.txt generation
+npm run check-links  # linkinator over the built site
+```
+
+Content lives in [`content/docs/`](content/docs/) as MDX. Chapter order is set in
+[`content/docs/meta.json`](content/docs/meta.json). Every page keeps a body `# H1` — it is the
+load-bearing title for search and downstream ingestion.

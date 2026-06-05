@@ -1,0 +1,20 @@
+---
+title: "Suspend, resume, and the settlement chain"
+description: "How a function suspends while awaiting work, how it is resumed when that work settles, and the chain that propagates a result back through the call graph."
+---
+
+# Suspend, resume, and the settlement chain
+
+<Callout type="caution" title="Chapter in progress">
+This chapter is being written. The outline below is what it will cover. Until it lands, the
+[specification](https://docs.resonatehq.io/spec) and the reference SDKs ([TypeScript](https://github.com/resonatehq/resonate-sdk-ts),
+[Python](https://github.com/resonatehq/resonate-sdk-py), [Rust](https://github.com/resonatehq/resonate-sdk-rs)) are the source of truth.
+</Callout>
+
+## What this chapter covers
+
+- Suspending on an unsettled promise
+- Registering for resumption, and the already-settled fast path
+- The settlement chain: settle then resume then execute
+- Awaiting many promises at once
+- Ordering and at-most-once resumption guarantees

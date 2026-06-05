@@ -1,0 +1,20 @@
+---
+title: "Replay and deterministic execution"
+description: "The heart of durable execution — replaying a function from its recorded steps, and the determinism contract that makes replay correct."
+---
+
+# Replay and deterministic execution
+
+<Callout type="caution" title="Chapter in progress">
+This chapter is being written. The outline below is what it will cover. Until it lands, the
+[specification](https://docs.resonatehq.io/spec) and the reference SDKs ([TypeScript](https://github.com/resonatehq/resonate-sdk-ts),
+[Python](https://github.com/resonatehq/resonate-sdk-py), [Rust](https://github.com/resonatehq/resonate-sdk-rs)) are the source of truth.
+</Callout>
+
+## What this chapter covers
+
+- What replay is, and when it happens
+- The recorded-step journal and how results are matched
+- The determinism contract, and how code can break it
+- Detecting and surfacing nondeterminism to developers
+- Designing so the easy path is the deterministic path

@@ -1,0 +1,20 @@
+---
+title: "Testing your SDK against the spec"
+description: "Validating an implementation against the protocol — conformance, invariants, and the property tests that catch the subtle failures."
+---
+
+# Testing your SDK against the spec
+
+<Callout type="caution" title="Chapter in progress">
+This chapter is being written. The outline below is what it will cover. Until it lands, the
+[specification](https://docs.resonatehq.io/spec) and the reference SDKs ([TypeScript](https://github.com/resonatehq/resonate-sdk-ts),
+[Python](https://github.com/resonatehq/resonate-sdk-py), [Rust](https://github.com/resonatehq/resonate-sdk-rs)) are the source of truth.
+</Callout>
+
+## What this chapter covers
+
+- The invariants every implementation must hold
+- Conformance: replaying recorded scenarios
+- Property-based testing for determinism and idempotency
+- Fault injection — crashing mid-step on purpose
+- Building confidence before you ship

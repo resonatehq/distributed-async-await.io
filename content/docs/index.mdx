@@ -1,0 +1,58 @@
+---
+title: "Home"
+pageTitle: "How to build a Resonate SDK"
+description: "A handbook for developers implementing the Distributed Async Await protocol in their own language — from the protocol mental model to production concerns."
+---
+
+# How to build a Resonate SDK
+
+There is a formal [specification](https://docs.resonatehq.io/spec) that tells you exactly what wire bytes a Resonate SDK produces. There are three reference SDKs — [TypeScript](https://github.com/resonatehq/resonate-sdk-ts), [Python](https://github.com/resonatehq/resonate-sdk-py), and [Rust](https://github.com/resonatehq/resonate-sdk-rs) — that implement it. What sits between them is the work nobody has written down: how you turn the protocol into a library that feels native to your language and that someone actually wants to use.
+
+That is what this handbook is for. It is written for the person building the next SDK.
+
+<Callout type="info" title="Spec tells you what; the handbook teaches you how">
+The [Distributed Async Await specification](https://docs.resonatehq.io/spec) defines the protocol: the promise lifecycle, the task and message model, the invariants a correct implementation must hold. This handbook assumes the spec as ground truth and teaches the layer above it — the design decisions, the idioms, and the traps that turn a wire-correct client into an idiomatic SDK.
+</Callout>
+
+## How the handbook is organized
+
+Fourteen chapters, in the order you need them. The arc runs from *why an SDK exists at all* to *what it takes to run one in production*.
+
+<DocCardList
+  items={[
+    {
+      type: "link",
+      label: "Mental model",
+      href: "/introduction",
+      description: "Why an SDK exists, and the protocol at a glance. Start here.",
+    },
+    {
+      type: "link",
+      label: "Building the client",
+      href: "/talking-to-the-server",
+      description: "The server connection, the promise lifecycle in code, the worker loop, and the invocation surface.",
+    },
+    {
+      type: "link",
+      label: "Hard concepts",
+      href: "/replay-and-determinism",
+      description: "Replay, deterministic execution, the settlement chain, and coroutines in your language.",
+    },
+    {
+      type: "link",
+      label: "Robustness & production",
+      href: "/time-retries-policies",
+      description: "Time and retries, codecs, local mode, conformance testing, and production concerns.",
+    },
+  ]}
+/>
+
+## Who this is for
+
+You are comfortable in at least one language and you want to bring durable execution to it — because your community lives there, or because the runtime model is a better fit than the reference SDKs. You do not need to have read the server source. You do need to be willing to think about determinism, idempotency, and what happens when a process dies mid-flight.
+
+If instead you want to *use* Resonate — build agents, workflows, and services on an existing SDK — you want the [Resonate docs](https://docs.resonatehq.io), not this handbook.
+
+## Have a question while you read
+
+This handbook is part of the Resonate corpus that [Echo](https://echo.resonatehq.io) is trained on. If something here is unclear, ask Echo — it answers with citations back into these pages and the spec.

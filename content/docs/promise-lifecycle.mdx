@@ -1,0 +1,20 @@
+---
+title: "Promise lifecycle in code"
+description: "Modeling the durable promise in your language — creation, resolution, rejection, cancellation — and keeping the SDK's view consistent with the server's."
+---
+
+# Promise lifecycle in code
+
+<Callout type="caution" title="Chapter in progress">
+This chapter is being written. The outline below is what it will cover. Until it lands, the
+[specification](https://docs.resonatehq.io/spec) and the reference SDKs ([TypeScript](https://github.com/resonatehq/resonate-sdk-ts),
+[Python](https://github.com/resonatehq/resonate-sdk-py), [Rust](https://github.com/resonatehq/resonate-sdk-rs)) are the source of truth.
+</Callout>
+
+## What this chapter covers
+
+- Mapping the promise state machine to your types
+- resolve / reject / cancel and the settled states
+- Idempotency keys and create-vs-get semantics
+- Reading results and awaiting settlement
+- Where SDK state ends and server truth begins

@@ -1,0 +1,20 @@
+---
+title: "The function registry & invocation surface"
+description: "Letting developers register durable functions and invoke them — locally and remotely — and how the SDK resolves a name to code on resume."
+---
+
+# The function registry & invocation surface
+
+<Callout type="caution" title="Chapter in progress">
+This chapter is being written. The outline below is what it will cover. Until it lands, the
+[specification](https://docs.resonatehq.io/spec) and the reference SDKs ([TypeScript](https://github.com/resonatehq/resonate-sdk-ts),
+[Python](https://github.com/resonatehq/resonate-sdk-py), [Rust](https://github.com/resonatehq/resonate-sdk-rs)) are the source of truth.
+</Callout>
+
+## What this chapter covers
+
+- Registering functions and the name-to-code mapping
+- The invocation shape and the interop subset
+- Local invocation versus remote (RPC) invocation
+- Resolving a registered function on a fresh process
+- Versioning registered functions across deploys
