@@ -2,13 +2,14 @@
 title: "Home"
 pageTitle: "How to build a Resonate SDK"
 description: "A handbook for developers implementing the Distributed Async Await protocol in their own language — from the protocol mental model to production concerns."
+hideTitle: true
 ---
 
 # How to build a Resonate SDK
 
-There is a formal [specification](https://docs.resonatehq.io/spec) that tells you exactly what wire bytes a Resonate SDK produces. There are three reference SDKs — [TypeScript](https://github.com/resonatehq/resonate-sdk-ts), [Python](https://github.com/resonatehq/resonate-sdk-py), and [Rust](https://github.com/resonatehq/resonate-sdk-rs) — that implement it. What sits between them is the work nobody has written down: how you turn the protocol into a library that feels native to your language and that someone actually wants to use.
+There is a formal [specification](https://docs.resonatehq.io/spec) that tells you exactly what wire bytes a Resonate SDK produces. There are three reference SDKs — [TypeScript](https://github.com/resonatehq/resonate-sdk-ts), [Python](https://github.com/resonatehq/resonate-sdk-py), and [Rust](https://github.com/resonatehq/resonate-sdk-rs) — that implement it. The layer between them is what this handbook is for: how you turn the protocol into a library that feels native to your language and that someone actually wants to use.
 
-That is what this handbook is for. It is written for the person building the next SDK.
+It is written for the person building the next SDK.
 
 <Callout type="info" title="Spec tells you what; the handbook teaches you how">
 The [Distributed Async Await specification](https://docs.resonatehq.io/spec) defines the protocol: the promise lifecycle, the task and message model, the invariants a correct implementation must hold. This handbook assumes the spec as ground truth and teaches the layer above it — the design decisions, the idioms, and the traps that turn a wire-correct client into an idiomatic SDK.

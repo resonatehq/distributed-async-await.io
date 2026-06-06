@@ -9,12 +9,12 @@ const footerLinks = {
     { label: "Resonate docs", href: "https://docs.resonatehq.io" },
   ],
   community: [
-    { label: "Discord", href: "https://resonatehq.io/discord" },
+    { label: "Discord", href: "https://www.resonatehq.io/discord" },
     { label: "GitHub", href: "https://github.com/resonatehq" },
+    { label: "Ask Echo", href: "https://echo.resonatehq.io" },
     { label: "Journal", href: "https://journal.resonatehq.io" },
-    { label: "RSVP", href: "https://resonatehq.io/rsvp" },
-    { label: "X / Twitter", href: "https://x.com/resonaborated" },
-    { label: "LinkedIn", href: "https://www.linkedin.com/company/resonatehq" },
+    { label: "X / Twitter", href: "https://x.com/resonatehqio" },
+    { label: "LinkedIn", href: "https://www.linkedin.com/company/resonatehqio" },
   ],
   company: [
     { label: "Home", href: "https://www.resonatehq.io" },

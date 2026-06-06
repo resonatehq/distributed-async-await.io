@@ -31,6 +31,9 @@ const SKIP_PATTERNS = [
   "substack",
   "resonatehq\\.io/(?!docs)",
   "mailto:",
+  // self-canonical/sitemap links to this domain 404 until cutover (the old
+  // Docusaurus deploy is still live); skip so they don't mask real breakage.
+  "distributed-async-await\\.io",
 ];
 
 console.log(`[check-links] Starting next start on :${PORT}`);

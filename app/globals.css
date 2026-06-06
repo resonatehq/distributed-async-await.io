@@ -141,14 +141,6 @@
     @apply max-w-full rounded-none border border-primary/10;
   }
 
-  .docs-content img[src*="banner-"] {
-    @apply w-full border-0 mb-6;
-  }
-
-  .docs-content .home-hero {
-    @apply border-0;
-  }
-
   .docs-content hr {
     @apply my-8;
     @apply border-bright-gray-200 dark:border-primary/10;

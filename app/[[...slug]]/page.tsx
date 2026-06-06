@@ -141,7 +141,7 @@ export default async function Page({ params }: PageProps) {
         {/* Content */}
         <article className="docs-content max-w-3xl">
           {!page.data.hideTitle && <h1>{page.data.pageTitle ?? page.data.title}</h1>}
-          {page.data.description && (
+          {!page.data.hideTitle && page.data.description && (
             <p className="text-lg text-bright-gray-500 dark:text-muted font-serif mb-8 !mt-0">
               {page.data.description}
             </p>

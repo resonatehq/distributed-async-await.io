@@ -2,8 +2,8 @@ import type { Config } from "tailwindcss";
 
 /**
  * Shared Resonate design system preset.
- * Consumed by both resonatehq.io (marketing) and docs.resonatehq.io (docs).
- * Source of truth for fonts, colors, and shadows.
+ * Copied from the Resonate docs/marketing stack; kept in sync by hand.
+ * Defines fonts, colors, and shadows for this site.
  */
 const resonatePreset: Partial<Config> = {
   darkMode: "class",
