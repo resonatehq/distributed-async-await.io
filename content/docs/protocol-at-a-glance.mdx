@@ -66,7 +66,7 @@ The response echoes the `kind` and the `corrId` — so a client multiplexing man
 - **`409` Conflict** — a version mismatch, an invalid state transition, or a failed fence. Not an error to retry blindly; a signal that your view of the world is stale.
 - **`300` Continue** — the fast-path answer to `task.suspend`: the promise you were about to wait on has *already* settled, so don't suspend, just continue. You will meet this in [chapter 8](/suspend-resume-settlement); it is the difference between a snappy SDK and one that takes a network round-trip to notice work is already done.
 
-The two canonical messages flowing *to* your worker are **Invoke** ("start executing this") and **Resume** ("the thing you awaited is ready"). Recognizing and dispatching those is the heart of the worker loop.
+The two canonical messages flowing *to* your worker are **Invoke** ("start executing this") and **Resume** ("the thing you awaited is ready"). Those are the spec's names for the interaction; on the envelope wire the SDKs carry both as a single message kind, `execute`, and tell a fresh start from a resume by what's *in* it rather than by the kind (chapter 5 builds this). Recognizing and dispatching those messages is the heart of the worker loop.
 
 ## The worker loop, end to end
 
@@ -87,4 +87,6 @@ Every envelope's `head.version` carries the protocol version the request is buil
 
 ## What you now have names for
 
-Five words that the rest of the handbook leans on: **promise** (the durable value), **task** (the claim on it, with its version and lease), **message** (the enveloped request/response), **Invoke / Resume** (the two messages that drive a worker), and **suspend / fulfill** (how a worker yields and completes). With those in hand, [Talking to the server](/talking-to-the-server) starts the client — the connection, the transport, and the first real requests over the wire.
+Five words that the rest of the handbook leans on: **promise** (the durable value), **task** (the claim on it, with its version and lease), **message** (the enveloped request/response), **Invoke / Resume** (the two messages that drive a worker, carried on the wire as `execute`), and **suspend / fulfill** (how a worker yields and completes).
+
+Next: [Talking to the server](/talking-to-the-server) — the connection, the transport, and the first real requests over the wire.

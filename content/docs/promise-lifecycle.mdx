@@ -21,7 +21,7 @@ type Value = {
 };
 ```
 
-All three reference SDKs model this faithfully — `Value` in `resonate-sdk-ts/src/network/types.ts`, `DurablePromiseValue` in `resonate-sdk-py/resonate/models/durable_promise.py`, `Value` in `resonate-sdk-rs/resonate/src/types.rs`. The `headers` field is easy to skip on a first pass because the simplest examples never use it, and then you discover it is load-bearing: it is where content-type and encoding metadata ride alongside the payload, which is what lets the codec layer (chapter 11) know how to decode `data` on the way back out. Model `headers` from the start; do not bolt it on.
+All three reference SDKs model this faithfully — `Value` in `resonate-sdk-ts/src/network/types.ts`, `DurablePromiseValue` in `resonate-sdk-py/resonate/models/durable_promise.py`, `Value` in `resonate-sdk-rs/resonate/src/types.rs`. The `headers` field is easy to skip on a first pass because the simplest examples never use it, and then you discover it is load-bearing: it is where content-type and encoding metadata ride alongside the payload, which is what lets the [codec layer](/encoding-and-codecs) know how to decode `data` on the way back out. Model `headers` from the start; do not bolt it on.
 
 The `data` itself is a string — the already-encoded payload. The promise layer does not know or care what is inside it; serialization happens one layer up, before the value reaches the wire. Keep that boundary clean: promises move opaque strings, codecs give them meaning.
 

@@ -14,7 +14,7 @@ The hard requirement the loop has to meet, stated once: a function can outlive t
 
 A task and its promise share an id and are created together, but they are different objects with different jobs: the promise owns the value, the task owns the claim on producing it. Critically, **a task exists only when work must be delivered to a worker** — that is, when the promise carries a `resonate:target` tag. Create a promise without a target and there is no task; nobody is dispatched. Create one with a target and the server creates a task in `pending` and enqueues an execute message to the address.
 
-A task moves through a small lifecycle — `pending` (claimable), `acquired` (a worker is on it), `suspended` (the worker is waiting on other promises), and the terminal `fulfilled`. (The spec also defines `halted`, a second terminal state reached only by administrative operations, not by the normal loop.) Your loop drives the first four transitions.
+A task moves through a small lifecycle — `pending` (claimable), `acquired` (a worker is on it), `suspended` (the worker is waiting on other promises), and the terminal `fulfilled`. (There is also `halted`, an administrative state a task enters via `task.halt` and leaves via `task.continue`, which returns it to `pending` with a bumped version — so it is *not* terminal, and not part of the normal loop.) Your loop drives the ordinary transitions.
 
 ## Claiming a task
 
@@ -31,7 +31,7 @@ When an execute message arrives over the transport (chapter 3), the worker claim
 
 Rust's `Core::on_message` (`resonate-sdk-rs/resonate/src/core.rs`) does the same: it receives `(task_id, version)` from the transport and calls `Sender::task_acquire` with the id, version, the worker's process id, and a TTL. A successful acquire transitions the task `pending → acquired` and hands back the root promise (and any preloaded promises — chapter 8). Now you hold the claim, and the clock on your lease starts.
 
-There is a second way a task is born already-claimed: when *this* worker is the one invoking, `task.create` creates the task directly in `acquired`, skipping the round-trip — you created the work, so you already hold it. Both paths converge on the same next step: run the function until it blocks or finishes.
+There is a second way a task is born already-claimed: when *this* worker is the one invoking, `task.create` creates the task directly in `acquired`, skipping the round-trip — you created the work, so you already hold it. (Its action must still carry a `resonate:target` tag, like any dispatched promise; the server rejects a `task.create` without one.) Both paths converge on the same next step: run the function until it blocks or finishes.
 
 ## The version: optimistic concurrency
 

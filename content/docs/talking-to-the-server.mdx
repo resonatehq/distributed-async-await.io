@@ -31,10 +31,10 @@ export interface Network {
 }
 ```
 
-Rust draws the same line with the `Network` trait (`resonate-sdk-rs/resonate/src/network.rs`), with an `async fn send` and a `recv` that takes a callback. The two methods that matter are right there: `send` for the requests you originate, `recv` for the messages the server pushes. Everything else — promises, tasks, the worker loop — is written against this interface, so the same SDK runs against a real server, an in-memory local server (chapter 12), or a future transport you haven't written yet.
+Rust draws the same line with the `Network` trait (`resonate-sdk-rs/resonate/src/network.rs`), with an `async fn send` and a `recv` that takes a callback. The two methods that matter are right there: `send` for the requests you originate, `recv` for the messages the server pushes. Everything else — promises, tasks, the worker loop — is written against this interface, so the same SDK runs against a real server, an in-memory [local server](/local-mode), or a future transport you haven't written yet.
 
 <Callout type="info" title="Design the seam first">
-Put the transport behind an interface on day one, even if you only ever implement one. The local-mode story (chapter 12), your test suite, and any future transport all depend on the rest of the SDK never reaching past this seam to touch an HTTP client directly. Both reference SDKs that speak the envelope ship at least two implementations of it.
+Put the transport behind an interface on day one, even if you only ever implement one. The [local-mode](/local-mode) story, your test suite, and any future transport all depend on the rest of the SDK never reaching past this seam to touch an HTTP client directly. Both reference SDKs that speak the envelope ship at least two implementations of it.
 </Callout>
 
 ## The request envelope
@@ -89,10 +89,12 @@ When the developer invokes a function "on the `workers` group," your SDK turns t
 
 ## A note on Python, and on async
 
-Two of the reference SDKs — TypeScript and Rust — speak the `{kind, head, data}` envelope this chapter describes. The Python SDK currently speaks an older REST protocol: separate endpoints (`POST /promises`, `PATCH /promises/{id}`), idempotency and `strict` carried as HTTP headers, and a different message vocabulary on the poll stream. If you are reading Python source as a reference, read it for its *execution model* (chapter 9), not its wire format — the envelope is the shape to build against, and whether Python converges on it is an open protocol question the spec itself flags.
+Two of the reference SDKs — TypeScript and Rust — speak the `{kind, head, data}` envelope this chapter describes. The Python SDK currently speaks an older REST protocol: separate endpoints (`POST /promises`, `PATCH /promises/{id}`), idempotency and `strict` carried as HTTP headers, and a different message vocabulary on the poll stream. If you are reading Python source as a reference, read it for its [execution model](/coroutines), not its wire format — the envelope is the shape to build against, and whether Python converges on it is an open protocol question the spec itself flags.
 
 <Callout type="info" title="The transport is where the runtime model shows through">
 This is also the first place the host language's concurrency model asserts itself. Rust's transport is `async fn` end to end — sends are awaited futures, the receive loop is a spawned task on the async runtime. TypeScript awaits `fetch` for sends and takes `EventSource` callbacks for receives on the single-threaded event loop. Python blocks: a dedicated daemon thread holds the SSE `GET` and reads it line by line. None of these is more correct than the others — each is the idiomatic way to hold a long-lived connection in that language. Build the receive loop the way a networking library in your language would, not the way another SDK did it.
 </Callout>
 
-With a transport that can send envelopes and receive pushed messages, you can make the first real requests. The next chapter creates, reads, and settles durable promises — [the promise lifecycle in code](/promise-lifecycle).
+With a transport that can send envelopes and receive pushed messages, you can make the first real requests.
+
+Next: [the promise lifecycle in code](/promise-lifecycle) — creating, reading, and settling durable promises, and the idempotency that makes every write safe to retry.
