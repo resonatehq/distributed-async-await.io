@@ -1,0 +1,79 @@
+---
+title: "Time, retries, and policies"
+description: "Durable sleep as a timer promise, scheduling work without a live process, and how a retry policy is expressed and where it actually runs."
+hideTitle: true
+---
+
+# Time, retries, and policies
+
+Three things a durable function needs that the core engine doesn't give it for free: the ability to *wait* for a stretch of wall-clock time and survive a crash during the wait, the ability to start work *on a schedule* with no process running at the moment it fires, and the ability to *retry* a step that failed without the developer hand-rolling a loop. None of these is a new primitive. Each is built from promises and tasks you already have — which is the point of this chapter. Once you see how, you also see where each one's behavior is settled and where it is still genuinely open across the reference SDKs.
+
+## Durable sleep is a timer promise
+
+A durable sleep has to be more than `setTimeout`. If the process dies during a week-long wait, the wait must survive and resume; and on [replay](/replay-and-determinism) a completed sleep must return instantly rather than sleeping again. Both fall out of building sleep as a promise.
+
+`ctx.sleep` creates a promise tagged `resonate:timer`, with a `timeoutAt` set to the wake time and *no* `resonate:target` tag — so, per the [task model](/tasks-and-the-worker-loop), no task is dispatched. Nothing executes; the promise sits with a deadline. When that deadline passes, the server settles the promise on its own. The tag is what tells it how:
+
+```rust
+// resonate-sdk-rs/resonate/src/context.rs — sleep_create_req
+tags.insert("resonate:timer".into(), "true".into());
+// no resonate:target → no task, just a deadline
+```
+
+On the server side, an expiring promise is resolved or rejected based on that tag (`timeout_state` in `resonate/src/oracle.rs`): a `resonate:timer` promise settles as **resolved** when its deadline passes (the sleep elapsed, normally), whereas an ordinary promise that hits its timeout settles as **rejected/timed-out** (it ran out of time, an error). One field distinguishes "the wait finished" from "the work expired." TypeScript builds the identical request in `sleepCreateOpts` (`resonate-sdk-ts/src/context.ts`), and both cap the timer's `timeoutAt` at the parent execution's own timeout so a sleep can never outlive the function that started it.
+
+On replay the mechanics are the ones you already built: the timer promise is already settled, so re-creating it returns the settled record immediately and the function walks past the sleep without waiting. A week-long sleep costs nothing while it runs and nothing to replay.
+
+<Callout type="caution" title="A tag-name divergence to write around">
+TypeScript and Rust tag the sleep promise `resonate:timer`, and the shipped server keys its resolve-vs-reject decision on exactly that tag. The Python SDK, which still speaks the [older wire protocol](/talking-to-the-server), tags its sleep `resonate:timeout` instead (`resonate-sdk-py/resonate/conventions/sleep.py`), matched by its local store. If you are reading across SDKs, don't take Python's tag as the wire contract — write your timer to the `resonate:timer` tag the current server understands, and treat the Python name as an artifact of the protocol it hasn't migrated off yet.
+</Callout>
+
+## Scheduling without a live process
+
+Sleep waits *inside* a running function. Scheduling is the other case: start a function on a recurring cadence when there may be no process awake at all when it fires. The answer is to make the *server* the thing that creates the work.
+
+`schedule.create` registers a cron expression plus a template for the promise to spawn each time it fires (`Schedules.create` in `resonate-sdk-ts/src/schedules.ts`):
+
+```ts
+await resonate.schedules.create(
+  scheduleId,
+  "0 * * * *",        // cron — hourly
+  promiseIdTemplate,  // server substitutes {{.id}} / {{.timestamp}}
+  promiseTimeout,
+  { promiseData, promiseTags },  // tags carry resonate:target to route a worker
+);
+```
+
+The server stores the schedule with a computed next-run time. When the clock reaches it, the server materializes a promise from the template — and if the template's tags include a `resonate:target`, it creates a task and enqueues the execute message, exactly as if a worker had created the promise itself (`op_schedule_create` and the tick path in `resonate/src/oracle.rs`). Then it advances the next-run time. No process needs to be awake at the firing instant; a worker only needs to be listening to *pick up* the task once it exists. Scheduling, in other words, is promise-creation moved server-side and put on a timer.
+
+## Retry policies, and where they run
+
+A durable step can fail. A retry policy decides whether and when to run it again — and unlike sleep and scheduling, this is an area where the reference SDKs genuinely diverge, so it's worth separating what's settled from what's open.
+
+**The policies themselves.** TypeScript and Python both ship four: `Constant`, `Linear`, `Exponential`, and `Never` (`resonate-sdk-ts/src/retries.ts`; `resonate-sdk-py/resonate/retry_policies/`). Each computes a delay from an attempt number, and `Never` declines to retry at all. `Exponential` is the substantive one — delay = `min(base * factor^attempt, maxDelay)` — and the two SDKs agree on its defaults: base 1s, factor 2, max delay 30s, attempts effectively unbounded. **Neither adds jitter** to the backoff in any policy; if you want jitter in your SDK, that is a design choice you are adding, not a convention you are matching.
+
+**The defaults.** Both TS and Python pick the policy *by the shape of the function*: a generator/coroutine function defaults to `Never`, and an ordinary function defaults to `Exponential` with the values above (`lfi`/`lfc` in `resonate-sdk-ts/src/context.ts`; `Options.retry_policy` in `resonate-sdk-py/resonate/options.py`). The reasoning is sound — a coroutine is itself made of durable steps that each retry, so retrying the whole orchestration would double up — and the two SDKs agree exactly.
+
+<Callout type="caution" title="Retry is not uniform across the SDKs — don't paper over it">
+Two open edges here. First, **Rust has no application-level retry policy at all**: its `Options` struct (`resonate-sdk-rs/resonate/src/options.rs`) carries tags, target, timeout, and version — no retry field, no policy enum, no SDK-level retry loop. A step that fails in the Rust SDK is not retried by the SDK. Second, even the TS/Python agreement (`Never` for generators, `Exponential(1s, ×2, 30s)` otherwise) is a *convention the two implementations share*, not something the specification pins as normative. Document the consensus, note that Rust is an outlier by omission, and treat "what the default must be" as unresolved rather than inventing an answer.
+</Callout>
+
+**Where the retry actually runs** is itself a three-way split worth knowing, because it changes the shape of the bytes on the wire:
+
+- **TypeScript** encodes the policy into the call's parameters: a remote invocation puts `retry: opts.retryPolicy?.encode()` inside `param.data` (`rfi`/`rfc` in `resonate-sdk-ts/src/context.ts`), so the policy travels with the task to whatever worker picks it up.
+- **Python** keeps the policy in the scheduler and applies it process-side: on a failed step the scheduler computes the next delay and re-enqueues the work as a `Delayed(Retry(...), delay)` (`resonate-sdk-py/resonate/scheduler.py`). The policy never leaves the process; the param carries no retry field. Python also guards the deadline — it won't schedule a retry whose delay would push the attempt past the promise's timeout.
+- **Rust** transmits no retry field at all, consistent with having no policy system.
+
+This is the [param-shape divergence](/function-registry) showing up again: the same logical concept ("how should this be retried") lives in the wire payload for one SDK, in process memory for another, and nowhere for the third. When you build yours, decide deliberately which, and make the choice legible.
+
+## Virtualizing time for tests
+
+One last time-related capability, and it sits half in the protocol and half in test infrastructure. Testing a week-long sleep or a daily schedule can't mean waiting a week. The server therefore supports *advancing its notion of now* on demand.
+
+The TypeScript SDK exposes this as a `resonate:debug_time` request header and a `debug.tick` operation (`resonate-sdk-ts/src/network/types.ts`): a client can stamp a request with a synthetic "now," or tick the server's clock forward, and the server processes every promise timeout, lease expiry, retry, and schedule firing that falls at or before that time (`op_debug_tick` and `resolve_time` in `resonate/src/oracle.rs`). The in-process [local network](/local-mode) leans on exactly this — it drives `debug.tick` on an interval to make timeouts fire without a real wall clock.
+
+<Callout type="info" title="Time virtualization is server-side, but only one SDK surfaces it">
+`debug.tick` and `resonate:debug_time` are real operations on the server's wire API, so they are protocol-normative in the sense that the server implements them. But only the TypeScript SDK exposes them in its client types. Python has a `StepClock` (`resonate-sdk-py/resonate/clocks/step.py`) used by its deterministic simulator — an in-process test clock, *not* a wire concept — and Rust surfaces neither. Frame time virtualization as testing infrastructure, and treat "must a conforming SDK expose `debug_time` injection?" as an open question rather than a settled requirement.
+</Callout>
+
+Next: [encoding and codecs](/encoding-and-codecs) — how a step's arguments and results become the encoded strings a promise actually carries, and what the headers alongside them are for.

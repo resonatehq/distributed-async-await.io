@@ -1,0 +1,25 @@
+{
+  "root": true,
+  "pages": [
+    "index",
+    "---Mental model---",
+    "introduction",
+    "protocol-at-a-glance",
+    "---Building the client---",
+    "talking-to-the-server",
+    "promise-lifecycle",
+    "tasks-and-the-worker-loop",
+    "function-registry",
+    "---Hard concepts---",
+    "replay-and-determinism",
+    "suspend-resume-settlement",
+    "coroutines",
+    "---Robustness---",
+    "time-retries-policies",
+    "encoding-and-codecs",
+    "local-mode",
+    "---Production wedge---",
+    "testing-against-the-spec",
+    "production-concerns"
+  ]
+}

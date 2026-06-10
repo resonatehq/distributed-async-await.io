@@ -1,0 +1,72 @@
+---
+title: "Suspend, resume, and the settlement chain"
+description: "How a function suspends while awaiting work without holding a thread, how the server resumes it when that work settles, and the chain that propagates a result back through the call graph."
+hideTitle: true
+---
+
+# Suspend, resume, and the settlement chain
+
+A durable function spends most of its life *not running*. It starts, does a little work, and then awaits something — a remote call, a timer, a sibling execution — that won't be ready for milliseconds or months. This chapter is about that boundary: how a function stops without blocking anything, and how the value it was waiting for finds its way back in and starts it running again.
+
+The thing to hold onto: when a durable function awaits an unsettled promise, the worker does **not** sit on a thread waiting. It tells the server "I'm waiting on this," lets go of the execution entirely, and goes and does other work. The server remembers, and pushes the function back to a worker when the awaited promise settles. The wait costs nothing while it lasts — no thread, no held connection, just state the server keeps — which is what makes a week-long sleep or a paused human-approval step no more expensive to run than a fast one.
+
+## Suspending: handing the wait to the server
+
+When the worker drives a function to the point where it awaits an unsettled promise, it issues `task.suspend`. This does two things atomically: it registers a callback — "resume *this* execution when *that* promise settles" — and it parks the task in the `suspended` state. The worker is now free.
+
+A function often awaits more than one thing at once (a parallel fan-out, an "await all of these"). The clean way to handle that is to register *all* the awaited promises in one operation, and both envelope SDKs do exactly that: a single `task.suspend` carrying an `actions` array of callback registrations, one per awaited promise (`Core.suspendTask` in `resonate-sdk-ts/src/core.ts`, `Core::suspend_task` in `resonate-sdk-rs/resonate/src/core.rs`). One round-trip, N callbacks, no window where some are registered and some aren't.
+
+<Callout type="info" title="Atomic suspend vs. sequenced callbacks">
+This is a place the SDKs genuinely differ. TypeScript and Rust suspend *atomically* — one `task.suspend` registers every awaited promise's callback together. The Python SDK *sequences* it — a separate callback registration per awaited promise, short-circuiting as soon as one comes back already-settled. Both reach a correct resting state, but the atomic form is the one to build: it's a single round-trip, and it has no intermediate state to reason about if the worker dies mid-suspend. Whether atomic multi-callback suspend is the canonical form is itself a tracked open question; the envelope SDKs treat it as the default.
+</Callout>
+
+## The already-settled fast path: status 300
+
+There's a race built into suspending. Between the worker deciding to suspend and the server processing it, the awaited promise might *already have settled* — the remote work was fast, or it finished while the suspend request was in flight. If the worker blindly suspended, it would register a callback on an already-settled promise and then wait for a resume message that has to make a full network round-trip to arrive. Slow, for something that's already done.
+
+The protocol closes this with the **`300` Continue** status. When the worker tries to suspend on a promise the server finds already settled, the server doesn't park the task — it answers `300`, meaning "don't suspend, the thing you're waiting on is ready, keep going." The worker drops straight back into the execution loop and continues, replaying the now-settled value (chapter 7) instead of waiting for it.
+
+Both envelope SDKs implement this directly. TypeScript's `suspendTask` treats a `300` response as "continue" and immediately re-enters `executeUntilBlocked` with the preloaded promises (`resonate-sdk-ts/src/core.ts`); Rust's `suspend_task` returns a `Redirect` variant carrying the preload and loops again (`resonate-sdk-rs/resonate/src/core.rs`). Python reaches the same outcome a different way — its sequential callback registration returns a resume immediately when the promise is already settled, a client-side equivalent of the fast path. The result is identical: work that's already done never costs a suspend/resume round-trip.
+
+<Callout type="info" title="300 is why a snappy SDK feels snappy">
+The fast path is easy to skip on a first implementation — suspend always, resume always, it's correct. But a workflow that awaits ten quick steps in a row would eat ten full resume round-trips it didn't need. Implementing `300` turns those into in-loop continuations. It's the difference between an SDK that's correct and one that's also fast on the common case.
+</Callout>
+
+## The settlement chain: settle → resume → execute
+
+Now the other side. A promise settles — some upstream execution called `resolve` (chapter 4). What turns that settlement into a suspended function waking up? The **settlement chain**, and it runs entirely through the server:
+
+1. **Settle.** The server records the promise as `resolved` (or `rejected`).
+2. **Fire callbacks.** The server looks at the callbacks registered on that promise — the ones put there by suspending workers — and for each, transitions the parked task back to `pending` and enqueues a message to the awaiter's address.
+3. **Execute / resume.** A worker — maybe the original, maybe a fresh one — receives that message, re-acquires the task, and re-runs the function. The awaited promise is now settled, so replay delivers its value at the point the function was waiting, and execution continues forward.
+
+The value doesn't travel *in* the resume message as the thing the function receives directly. The message just says "this task is runnable again." The worker re-acquires, and the settled value reaches the function through the ordinary replay path — `promise.create` for that step returns the now-settled record. Resumption and replay are the same machinery; resumption is just replay triggered by a settlement.
+
+<Callout type="info" title="A naming wrinkle across the SDKs">
+The envelope SDKs use one message kind, `execute`, for both the *first* dispatch of a task and its *resumption* after a settlement — the worker can't tell "start" from "resume" by the message kind, and doesn't need to, because replay handles both identically. A separate `unblock` message exists for external *listeners* — addresses registered to be notified when a promise settles, such as a caller holding a handle and awaiting a result from outside the execution. The Python SDK names these differently — `invoke`, `resume`, and `notify` as three distinct messages. Same chain, different vocabulary; if you're reading across SDKs, map `execute`↔`invoke`/`resume` and `unblock`↔`notify`.
+</Callout>
+
+## Exactly-once resumption
+
+The contract that makes the chain trustworthy is that each registered callback fires **exactly once** when its promise settles. Not zero times (the function would hang forever), not twice (it would resume two copies of the same execution).
+
+The server enforces it structurally. When a promise settles and its callbacks fire, the server **clears the callback set in the same atomic step** that enqueues the resume messages (`Server.triggerCallbacks` in the local server model, `resonate-sdk-ts/src/network/local.ts`; Python clears its callbacks dict on settlement in `resonate-sdk-py/resonate/stores/local.py`). A second settlement event — there shouldn't be one, promises are terminal — finds no callbacks to fire. And registering a callback on an *already-settled* promise is a no-op that returns the settled state immediately rather than storing a callback that could fire later. That no-op is the same condition that produces the `300` fast path above: the two are the same invariant seen from two directions.
+
+This is worth stating carefully, because the imprecise version — "at-most-once resumption" — undersells it and invites the wrong mental model. The guarantee is **exactly-once consumption of a registered callback**: once you've successfully suspended on a pending promise, you *will* be resumed when it settles, and you will be resumed *once*. Build your SDK to lean on that — don't add defensive de-duplication on top of resume messages as if they might double-fire; the callback-consumption contract already prevents it, and layering your own dedup on top usually just hides a bug in how you registered the callback in the first place.
+
+## Preload: resuming without re-fetching
+
+One efficiency closes the loop with chapter 7. When a worker re-acquires a task to resume it, the steps the function already completed are settled promises it's about to replay over. Rather than make the worker round-trip for each, the server hands them back on acquire as **preload** — the settled promises in this execution's branch, returned alongside the task. The SDK loads them into a cache and serves the replay from there (`buildEffects` in `resonate-sdk-ts/src/util.ts`, `Effects::new` in `resonate-sdk-rs/resonate/src/effects.rs`; Python passes the settled leaf promise directly into its resume command). And the `300` fast path carries a preload too, so a continue-without-suspending picks up the same way. Preload is what keeps resumption from getting slower as an execution's history grows.
+
+## The shape of it
+
+Step back and the whole chapter is one loop, drawn around the wait:
+
+- A function awaits an unsettled promise → the worker `task.suspend`s (atomically, over all awaited promises) and lets go.
+- Unless the promise was already settled → `300`, and the worker just continues.
+- The promise settles → the server fires the callback exactly once, parks-to-pending, and dispatches a resume.
+- A worker re-acquires, replays over the preloaded history, and the function continues from exactly where it waited.
+
+That loop, plus the determinism of chapter 7, is the complete durable-execution engine. A function can suspend a thousand times across a thousand process lifetimes, and each resumption lands it back exactly where it was, with exactly the values it had. Everything from here — retries, codecs, local mode, conformance testing, production concerns — is refinement on top of an engine that, at this point, already works.
+
+Next: [coroutines in your language](/coroutines) — the concrete mechanics of suspending and resuming a function in your host runtime, where the generator-versus-future split finally gets its own chapter.

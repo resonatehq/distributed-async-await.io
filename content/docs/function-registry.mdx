@@ -1,0 +1,82 @@
+---
+title: "The function registry & invocation surface"
+description: "Letting developers register durable functions and invoke them — locally and remotely — how a name becomes a targeted promise, and how a fresh process resolves it back to code."
+hideTitle: true
+---
+
+# The function registry & invocation surface
+
+The worker loop (chapter 5) knows how to run a function. This chapter is about the two ends of that: how a developer's function gets a *name* the server can dispatch to, and how an invocation of that name becomes a durable promise the server actually delivers. It is the developer-facing surface — `register` and `run`/`rpc` — and the wiring underneath it.
+
+The pivotal fact, the one everything else hangs on: **a fresh process must be able to find the code for a promise it did not create.** When a worker resumes an execution after the original process is gone, all it has is a promise carrying a function *name*. It has to map that name back to a live function pointer. That is what the registry is for, and it is why durable functions are registered by name rather than passed by reference.
+
+## The registry: names to code
+
+The registry is a map from name to function. A developer registers each durable function once at startup, and the worker consults the map whenever an execute message names a function to run.
+
+The shape differs only in richness across the reference SDKs:
+
+- **TypeScript** keeps a two-way map (`resonate-sdk-ts/src/registry.ts`) — name → version → item, and a reverse map from the function pointer itself, so a developer can invoke by either the string name or the function value.
+- **Python** mirrors that with forward and reverse dicts (`resonate-sdk-py/resonate/registry.py`).
+- **Rust** keeps a single `HashMap<String, RegistryEntry>` keyed by name (`resonate-sdk-rs/resonate/src/registry.rs`); the name is a compile-time constant attached to the function by the `#[resonate_sdk::function]` macro.
+
+On the worker side, the dispatch is the same everywhere: read the function name out of the incoming promise's param, look it up in the registry, run what you find. If the name isn't registered, the worker can't run it — which is the failure mode to design for explicitly (a worker that receives work for a function it doesn't know about should surface that loudly, not silently drop it).
+
+## Versioning registered functions
+
+Code changes while executions are in flight. A function registered today may need to resume an execution that a *previous* deploy started, and the two versions might not be interchangeable. The registry is where that's managed.
+
+TypeScript and Python both version the registry — name → version → function — and select the latest when the caller doesn't pin one (`Registry.latest` in both). The function version travels in the invocation param (below), so a resume can request the version that started the execution. Rust does not yet version the registry; its entries are name-only, and the source notes function versioning as not-yet-supported. If your language's deploys can overlap — and in production they will — design the registry to hold multiple versions of a name from the start, even if you select latest by default. Retrofitting versioning onto a name-only map is painful once executions depend on it.
+
+## The invocation surface
+
+Invocation comes in two axes, and the developer-facing API exposes the cross product:
+
+- **Local vs remote.** A *local* call (`run` / `ctx.run` / `lfc`) runs the function as a durable step in the current execution. A *remote* call (`rpc` / `ctx.rpc` / `rfc`) dispatches it to a worker — possibly a different process, possibly a different service — and awaits the result through a durable promise.
+- **Await vs fire-and-forget.** The blocking forms (`run`, `rpc`) await the result. The `begin*` / handle-returning forms (`beginRun`, `beginRpc`, `begin_run`, `begin_rpc`) return a handle immediately so the caller can await later or not at all. A `detached` call goes further — it deliberately breaks lineage, spawning independent durable work that outlives the caller.
+
+All three SDKs land on the same vocabulary, varying only in idiom: TypeScript and Python expose `run`/`beginRun`/`rpc`/`beginRpc` plus `ctx.lfi`/`lfc`/`rfi`/`rfc` inside an execution; Rust uses builder structs (`resonate.run(...)`, `resonate.rpc(...)`) that you `.await` or `.spawn()`, and `ctx.run`/`ctx.rpc`/`ctx.detached` inside one.
+
+The distinction that matters at the protocol level is **whether the invocation creates a task**. `run` creates a task directly (the work is claimed locally), so it goes out as a `task.create`. `rpc` creates only a promise with a target tag and lets the server dispatch a task to whichever worker is listening — so it goes out as a `promise.create`. That tag is the whole mechanism.
+
+## How an invocation becomes a targeted promise
+
+A remote invocation is a `promise.create` with a `resonate:target` tag. That tag is the trigger from chapter 5: a promise carrying it causes the server to create a task and push an execute message to the target address. No target, no task, no dispatch. The target value is an address resolved from the group or service name the developer named — both envelope SDKs run the bare name through a resolver (`target_resolver` in Rust, the network's `anycast`/`match` in TypeScript) to produce a `poll://any@group` address.
+
+What rides in the promise's `param.data` is the instruction for the remote worker — the function to run and the arguments to run it with. The interop core is `{func, args}`, and the SDKs add to it:
+
+| Field | TypeScript | Python | Rust |
+|---|---|---|---|
+| `func` | ✓ (name) | ✓ (name) | ✓ (name) |
+| `args` | ✓ | ✓ | ✓ |
+| `kwargs` | — | ✓ | — |
+| `version` | ✓ | ✓ | — |
+| `retry` | ✓ (encoded policy) | — | — |
+
+The portable subset every implementation can rely on is `{func, args}`; the rest are SDK-local extensions whose normativity is, per the spec, still an open question. If you want your SDK's invocations to be claimable by a worker built in another language, keep `{func, args}` clean and treat the extras as additive — and don't assume another SDK will honor your `version` or `retry` field.
+
+## The convention tags, and a real divergence
+
+The invocation tags do more than route. They record the execution tree: which promise is the root of this whole execution, which is the direct parent, which branch this is. The server and SDK use them to thread resumption back to the right place. The TypeScript and Rust SDKs agree on the vocabulary they set on an invocation:
+
+| Tag | Role | Source |
+|---|---|---|
+| `resonate:target` | Delivery address — the dispatch trigger. | spec-reserved |
+| `resonate:origin` | The root promise of the whole execution tree. | spec-reserved |
+| `resonate:parent` | The direct parent promise. | spec-reserved |
+| `resonate:branch` | This execution branch (drives preload — chapter 8). | spec-reserved |
+| `resonate:scope` | `global` for remote, `local` for in-process steps. | SDK convention |
+
+The first four are in [the spec's reserved-tags table](https://docs.resonatehq.io/spec/execution-model/message-passing#reserved-tags) — the authoritative list, which also reserves `resonate:timer` (the durable-sleep tag from chapter 4) and `resonate:delay` (reserved for future use). `resonate:scope` is *not* a spec-reserved tag; it's a convention the SDKs use within the `resonate:` namespace to distinguish a local step from a remote one. Build the spec-reserved tags to the spec; treat `resonate:scope` as the implementation detail it is, and don't assume another SDK reads it.
+
+<Callout type="caution" title="Open question: the Python convention-tag divergence">
+The Python SDK uses a *different* routing vocabulary: `resonate:invoke` where TypeScript and Rust use `resonate:target`, and `resonate:root` where they use `resonate:origin` — and it does not set `resonate:branch` at all. These are different routing primitives, not just different names, so a Python worker and a TypeScript worker in the same process group cannot dispatch to each other today. Which vocabulary the spec blesses as canonical, and when Python migrates, is an open question on the protocol. **Build to the `resonate:target` / `resonate:origin` consensus** (it is what the spec's reserved-tags table documents), and know the Python divergence exists if you are reading it as a reference or planning cross-SDK interop.
+</Callout>
+
+## Resolving a function on a fresh process
+
+Close the loop with the scenario this chapter opened on. A worker boots. It has a registry, populated at startup by the developer registering the same functions the previous process registered. The server pushes it an execute message for a task whose promise names function `chargeCard`, version 2. The worker looks up `("chargeCard", 2)` in its registry, gets a live function pointer, acquires the task, and runs it — replaying any steps already recorded (chapter 7). The original process is gone; the work continues, because the name in the promise and the name in the registry agree.
+
+This is why two disciplines from earlier chapters are load-bearing here: register every durable function at startup *before* you start receiving work, and keep names stable across deploys (version them rather than rename them). A name that resolves on the process that created an execution but not on the process that resumes it is the one bug that turns durable execution back into ordinary, mortal execution.
+
+Next: [replay and deterministic execution](/replay-and-determinism) — what actually happens when that resumed worker re-runs a function whose steps are already half-recorded.

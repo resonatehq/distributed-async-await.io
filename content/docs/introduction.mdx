@@ -1,0 +1,60 @@
+---
+title: "Why an SDK exists"
+description: "A durable execution SDK exists to make one hard guarantee feel like ordinary code. Understanding that job is the whole foundation for building one."
+hideTitle: true
+---
+
+# Why an SDK exists
+
+A program that runs to completion on one machine, in one process, without ever being interrupted, does not need much from a library. You call a function, it returns, you move on. The standard library is enough.
+
+Durable execution starts from the opposite assumption: the process *will* be interrupted. It will crash, get redeployed, run out of memory, or simply be told to scale to zero while it waits on something slow. The work it was doing — the half-finished payment, the agent three tool-calls deep, the workflow sleeping for a week — has to survive that. And when a new process picks the work back up, it must continue as if nothing happened, not start over and not double-act.
+
+That guarantee is the entire reason a Resonate SDK exists. Everything you will build in this handbook is in service of making that guarantee feel like ordinary code.
+
+## The job, stated plainly
+
+An SDK's job is to let a developer write a function that looks almost exactly like a normal function in their language — and have it become *durable* without them thinking about how.
+
+"Almost exactly" is doing a lot of work in that sentence, and most of this handbook lives inside it. This is the surface you are building for them — the experience that has to hold. The developer writes:
+
+```text
+result = await someStep(input)
+```
+
+and what they get is a step whose result is recorded the first time it runs, so that if the process dies and another process resumes the function, that step is not run again — its recorded result is handed back instead. The function moves forward. It never moves backward.
+
+The developer should not have to know that a server recorded the result, that a promise was created and resolved, that a task was claimed and a lease was held. They wrote a function. It survived a crash. That is the experience you are building.
+
+## Where the SDK sits
+
+It helps to be precise about the boundary, because it is the single most important architectural fact in this handbook.
+
+- **The server** is the source of truth. It holds the durable promises — the records of "this work was asked for" and, eventually, "this is how it came out." It hands out tasks, tracks leases, and enforces the invariants that make recovery safe. It does not run your code.
+- **The SDK** runs your code. It connects to the server, creates and reads promises, claims tasks, executes the developer's functions, records each step's outcome, and — crucially — knows how to *replay* a function from its recorded steps when a fresh process resumes it.
+
+The spec describes the server's side of this contract precisely: the wire envelope, the promise state machine, the task lifecycle, the invariants. You can read it as the set of bytes the server will accept and the guarantees it makes in return. The SDK is the other half of that contract, written in your language, for your developers.
+
+<Callout type="info" title="The seam this handbook lives on">
+The [specification](https://docs.resonatehq.io/spec) tells you *what bytes to produce and what guarantees hold*. It is language-agnostic by design. This handbook teaches you *how to turn those bytes into a library that feels native* — which is necessarily language-specific, and is the part the spec cannot write for you.
+</Callout>
+
+## What "idiomatic" actually demands
+
+Wire-correctness is the floor, not the finish line. A client that produces exactly the right bytes is still only a client; the work that turns it into a library people reach for is making the durable function read like a normal function in the host language.
+
+In a language with `async`/`await`, durability should ride on `await`. In a language built on generators or coroutines, it should ride on `yield`. In a language with futures, it should compose with futures. The reference SDKs already span two quite different shapes of this — TypeScript and Python use a sync, generator-based model; Rust uses an async, future-based one — and a new SDK's first real design decision is which shape fits the host language's grain.
+
+Idiomatic also means the parts that *cannot* be hidden are surfaced honestly. Durable execution imposes three constraints on the developer's code, and a good SDK makes them legible rather than burying them:
+
+- **Determinism** — replayed code must take the same path it took the first time, or the recorded steps stop lining up.
+- **Idempotency** — a step may be *attempted* more than once across crashes; its externally visible effect must happen once.
+- **Activation lifetime** — a function may outlive the process that started it, so it cannot lean on in-process state surviving.
+
+You will meet each of these again, in code, in later chapters. For now the point is only this: an SDK is the thing that makes the easy parts disappear and the genuinely hard parts visible. Getting that split right is the craft.
+
+## What comes next
+
+The next chapter, [the protocol at a glance](/protocol-at-a-glance), zooms out to the moving parts you will be implementing — promises, tasks, messages, and the loop that ties them together — so that when we start writing client code in [Talking to the server](/talking-to-the-server), the pieces already have names.
+
+You do not need to memorize the protocol to start. You need to hold one idea: **the developer wrote a function, and your job is to make it survive.** Everything else is detail in service of that.

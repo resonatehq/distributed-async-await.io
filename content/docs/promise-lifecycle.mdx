@@ -1,0 +1,104 @@
+---
+title: "Promise lifecycle in code"
+description: "Modeling the durable promise in your language — creation, settlement, the value schema, the terminal states, and the idempotency that makes every write safe to retry."
+hideTitle: true
+---
+
+# Promise lifecycle in code
+
+The durable promise is the unit of truth (chapter 2), and this chapter turns it into code: the types that model it, the operations that move it through its lifecycle, and the one property — idempotency — that makes a distributed client safe. Everything here is a thin layer over [the Durable Promise Specification](https://docs.resonatehq.io/spec/programming-model/durable-promise-specification); the spec is the contract, and this is how you implement your side of it.
+
+A promise has exactly two phases. It is **pending** until someone settles it, and then it is settled — permanently. The whole API divides along that line: a downstream side that creates and reads, an upstream side that settles.
+
+## The value schema
+
+Before the operations, the data. A promise carries two values: a `param` (what it was created with) and a `value` (what it settled to). Both have the same shape, and getting that shape right early saves you from reworking every operation later. A `Value` is **`headers` plus `data`**:
+
+```ts
+type Value = {
+  headers?: Record<string, string>;
+  data?: string;
+};
+```
+
+All three reference SDKs model this faithfully — `Value` in `resonate-sdk-ts/src/network/types.ts`, `DurablePromiseValue` in `resonate-sdk-py/resonate/models/durable_promise.py`, `Value` in `resonate-sdk-rs/resonate/src/types.rs`. The `headers` field is easy to skip on a first pass because the simplest examples never use it, and then you discover it is load-bearing: it is where content-type and encoding metadata ride alongside the payload, which is what lets the [codec layer](/encoding-and-codecs) know how to decode `data` on the way back out. Model `headers` from the start; do not bolt it on.
+
+The `data` itself is a string — the already-encoded payload. The promise layer does not know or care what is inside it; serialization happens one layer up, before the value reaches the wire. Keep that boundary clean: promises move opaque strings, codecs give them meaning.
+
+## The terminal states
+
+A promise has one non-terminal state and four terminal ones. Your SDK models all five, because each one means something different to code that awaits the promise:
+
+| State | What it means to an awaiter |
+|---|---|
+| `pending` | Not settled yet. Keep waiting. |
+| `resolved` | Success. Resume with `value`. |
+| `rejected` | Failure. Resume by raising `value` as an error. |
+| `rejected_canceled` | Settled by an explicit cancel. A deliberate failure. |
+| `rejected_timedout` | The promise's timeout elapsed before anyone settled it. |
+
+The reference SDKs all carry the full set — the `state` union in `resonate-sdk-ts/src/network/types.ts`, the `PromiseState` enum in `resonate-sdk-rs/resonate/src/types.rs`, the `Literal[...]` in Python's `durable_promise.py`. The one that catches implementers is `rejected_timedout`. A promise is not silently abandoned when its deadline passes; the server transitions it to `rejected_timedout`, a *real terminal state*, and everything awaiting it resumes with that failure. If you model timeout as "still pending, but stale," your replay logic (chapter 7) will hang waiting for a settlement that already, in effect, happened.
+
+<Callout type="info" title="Casing is a wire detail, not a model detail">
+The envelope SDKs send these states lowercase (`rejected_timedout`); Python's older REST protocol uses uppercase (`REJECTED_TIMEDOUT`). Pick one representation for your internal types and normalize at the wire boundary — don't let the server's string casing leak into the rest of your SDK.
+</Callout>
+
+## Creating a promise
+
+`promise.create` is the downstream operation: it brings a pending promise into existence. The request carries the id, an absolute timeout, the `param` value, and the tags:
+
+```ts
+// resonate-sdk-ts/src/promises.ts — Promises.create
+{
+  kind: "promise.create",
+  head: { corrId, version },
+  data: { id, timeoutAt, param: { headers, data }, tags },
+}
+```
+
+Rust's `Promises::create` (`resonate-sdk-rs/resonate/src/promises.rs`) sends the same envelope with a `PromiseCreateReq { id, timeout_at, param, tags }`. Two fields deserve attention:
+
+- **`timeoutAt` is absolute, not a duration.** It is a Unix-epoch timestamp in milliseconds — the wall-clock moment the promise expires — not "30 seconds from now." Your SDK computes it from the developer's requested duration and the parent's deadline (a child never outlives its parent), then sends the absolute value. All three SDKs do this conversion at the context layer and put an absolute millisecond timestamp on the wire. The reference default when the developer specifies nothing is generous — 24 hours in both TypeScript and Rust.
+- **`tags` is where routing lives.** A bare promise created with no `resonate:target` tag is just a value that someone will settle by other means. Add `resonate:target`, and the server creates a *task* and pushes it to a worker (chapters 5 and 6). The tag is the difference between "a promise" and "a promise someone is dispatched to fulfill."
+
+## Settling a promise
+
+The upstream side is three operations that all do the same structural thing — move a pending promise to a terminal state with a `value` — and differ only in which state:
+
+- **`resolve`** → `resolved`, signaling success.
+- **`reject`** → `rejected`, signaling failure.
+- **`cancel`** → `rejected_canceled`, signaling deliberate abandonment.
+
+Both envelope SDKs collapse these into one internal call. TypeScript's `Promises.resolve/reject/cancel` all delegate to a private `settle()` that sends `promise.settle` with the target state (`resonate-sdk-ts/src/promises.ts`); Rust's `resolve/reject/cancel` all delegate to a private `settle()` taking a `SettleState` enum (`resonate-sdk-rs/resonate/src/promises.rs`). Mirror that: one settle path, three thin public verbs. It keeps the value-encoding and error-handling in one place instead of three.
+
+Note what is *not* on this list: there is no "un-settle." A terminal promise is terminal. An attempt to settle an already-settled promise does not error blindly — it runs into the idempotency rules below, which is the whole point.
+
+## Idempotency: why every write is safe to retry
+
+Here is the problem that idempotency solves, and it is the central problem of any distributed client. You send `promise.create`. The network drops the *response*. Did the create happen? You cannot know. You have to retry — and the retry must not create a second promise or corrupt the first.
+
+The protocol gives you two independent layers of protection, and a complete SDK understands both even when it leans mostly on the first:
+
+**The promise id is the primary idempotency key.** Promise ids are caller-chosen and meaningful, not random. Creating a promise with an id that already exists is a safe no-op: the server returns the *existing* promise, unchanged. So the retry above is safe by construction — same id, same promise, the second create just reads back the first. Both envelope SDKs rely on this directly: in TypeScript's local server model, `promise.create` for an existing id returns the existing record with `200` (`resonate-sdk-ts/src/network/local.ts`). This is why deterministic id generation (chapter 7) is not a convenience — it is the foundation of idempotency.
+
+**Idempotency keys give finer control, per the spec's state-transition table.** The [324-row state table](https://docs.resonatehq.io/spec/programming-model/durable-promise-specification#state-transitions) defines two keys — `ikc` (idempotency key for *create*) and `iku` (idempotency key for *complete*) — plus a `strict` flag, governing exactly when a repeated operation deduplicates versus conflicts. The keys let two operations on the same id be recognized as "the same intent" (deduplicate, return OK) or "a different intent" (reject as already-pending). The Python SDK threads these explicitly — `ikey` and `ikey_for_complete` carried as request headers, matched in the store's transition logic (`resonate-sdk-py/resonate/stores/local.py`). The envelope SDKs currently lean on the id-as-key model and do not expose `ikc`/`iku` on their public surface.
+
+The asymmetry to internalize: **idempotency keys protect against duplicate *state*.** A promise's final value is what matters, so a safely-retried settle that lands the same value is harmless. This is the opposite of how tasks behave — a task's *version* protects against duplicate *progress* (chapter 5) — and the two mechanisms are deliberately different because they guard different things.
+
+<Callout type="info" title="The strict flag, briefly">
+`strict` (in the spec's transition table, and exposed by the Python SDK) tightens settlement: with `strict=false`, settling a promise that already timed out quietly returns its `rejected_timedout` state; with `strict=true`, the same attempt errors, so a caller that *needs* to know its settlement actually took effect can find out. Whether `strict` belongs on an end-user surface at all is one of the spec's open questions — treat it as a protocol-level capability to support, not necessarily a knob to put in front of every developer.
+</Callout>
+
+## Timeout and the timer tag
+
+Timeout is the one settlement that no caller performs — the server does it when `timeoutAt` passes and the promise is still pending, transitioning it to `rejected_timedout`. There is one deliberate exception, and it is how durable sleep is built: a promise tagged `resonate:timer` resolves on timeout instead of rejecting. Create a promise with that tag and a `timeoutAt` five minutes out, await it, and you have a durable five-minute sleep — one that survives a crash, because the deadline lives on the server, not in a process's timer. Both envelope SDKs set `resonate:timer` on their sleep promises (`resonate-sdk-ts/src/context.ts`, `resonate-sdk-rs/resonate/src/context.rs`) and flip the timeout state accordingly in their local server model.
+
+<Callout type="info" title="Tag-name divergence to know about">
+TypeScript and Rust use `resonate:timer` for this; the Python SDK uses `resonate:timeout`. They are not interoperable — a worker built against one name will not recognize the other's sleep promises. The spec's reserved-tags table names `resonate:timer`; build to that, and know the divergence exists if you are reading Python as a reference. The convention-tag mismatch across SDKs is a tracked open question, not a settled choice.
+</Callout>
+
+## Where SDK state ends and server truth begins
+
+The discipline that ties this chapter together: the server is the source of truth, and your in-memory promise objects are a cache of it. When you create a promise, you hold a `PromiseRecord`, but its authoritative state can change underneath you — it can be resolved by another execution, or timed out by the server, while your copy still says `pending`. Never treat your local record as final. A settlement, a read, or a resumption (chapter 8) is what tells you the real state. Build your promise types as snapshots with a known-as-of quality, not as the truth itself — and let the next chapters, on tasks and the worker loop, show how the server keeps that truth consistent across crashing, restarting workers.
+
+Next: [tasks and the worker loop](/tasks-and-the-worker-loop) — the claim on a promise, and the engine that drives it.

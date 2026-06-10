@@ -1,0 +1,51 @@
+---
+title: "Local mode for development"
+description: "Running the whole engine in-process so a developer can build with nothing else installed — what it faithfully emulates, and the one gap you have to be honest about."
+hideTitle: true
+---
+
+# Local mode for development
+
+A developer's first encounter with your SDK should not require them to stand up a server. The whole engine — promise store, task dispatch, leases, the settlement chain — is a state machine, and a state machine can run in the same process as the worker driving it. **Local mode** is that: an in-process implementation of the server, swapped in behind the same interface the real network uses, so a developer can write a durable function and watch it survive crashes with nothing installed. This chapter is how to build it, what it can and cannot stand in for, and the one place where standing in for the real server quietly changes behavior — which, keeping with [surfacing the hard parts honestly](/introduction), you should surface rather than bury.
+
+## The whole server, in a Map
+
+Local mode works because the server's contract is small and its state is plain data. The reference SDKs implement it as an in-process object holding the same state the real server holds and answering the same wire operations.
+
+TypeScript's `LocalNetwork` (`resonate-sdk-ts/src/network/local.ts`) embeds a `Server` whose entire state is a few maps — promises, tasks, schedules — plus timeout queues and an outgoing-message buffer. It implements the `Network` interface the real transport implements: `send` synchronously runs the request through the server's state machine and resolves with the response; `recv` registers a subscriber; and an `init` timer drives the clock (more on that below). Rust mirrors this almost line for line — its `LocalNetwork` wraps a `ServerState` behind an `Arc<Mutex<…>>` and is explicitly a port of the TypeScript `Server` (`resonate-sdk-rs/resonate/src/network.rs`). Python splits the two roles the TS server fuses: a `LocalStore` is the state machine, running on its own thread, and a `LocalMessageSource` is the push channel a worker reads from (`resonate-sdk-py/resonate/stores/local.py`, `resonate-sdk-py/resonate/message_sources/local.py`).
+
+The key design move in all three: **the same `Network`/store interface the HTTP transport implements is what local mode implements.** Nothing above the transport — not the worker loop, not the coroutine driver, not replay — knows or cares which is underneath. That is what makes local mode a faithful rehearsal rather than a separate code path: the SDK runs identically; only the bytes' destination changes.
+
+<Callout type="info" title="Drive the clock, or timeouts never fire">
+A real server has a wall clock advancing on its own. An in-process one doesn't — nothing makes a lease expire or a timer settle unless you tell it time has passed. The reference SDKs solve this two ways at once: an eager check that settles any past-due promise inline whenever the state machine is touched (so logical reads are always correct), plus a periodic tick — `LocalNetwork` fires `debug.tick` on a one-second interval (`resonate-sdk-ts/src/network/local.ts`; Rust's `ServerState::tick`) — to drive time-based transitions that no request would otherwise trigger. Without the tick, a durable sleep in local mode would never wake.
+</Callout>
+
+## What it emulates, and what it cannot
+
+Local mode is faithful to the parts of the contract that are *logic*: the full promise lifecycle (create, settle, idempotent re-create, timeout), the task state machine (pending → acquired → suspended → fulfilled), lease tracking, the [settlement chain](/suspend-resume-settlement) that resumes a suspended task when its awaited promise settles, and the preload that makes resumption inexpensive. A developer can write a workflow, kill the process mid-flight, restart, and watch it replay — the whole point — entirely in local mode.
+
+What it *cannot* emulate are the parts that are *distribution*, and being clear-eyed about these keeps you from testing a fiction:
+
+- **Multiple processes.** One in-process server is one process. You cannot exercise a task being claimed by a worker in a *different* process, which is the scenario the [version-and-lease machinery](/tasks-and-the-worker-loop) exists for. Local mode tests your recovery logic against a simulated crash-and-restart, not against a true concurrent claim.
+- **Persistence.** All state is in memory. Process exit is a clean slate — there is no on-disk durability to recover from, only in-process replay within a single run.
+- **Routing and load-balancing.** The real server routes anycast messages to one of many listening workers; the TS local server broadcasts every outgoing message to all subscribers, and Python's local store accepts exactly one connection. Multi-worker routing is not under test.
+- **Search, auth, and tracing.** The `*.search` operations return "not implemented" locally; token verification is a no-op; transport-level tracing is absent.
+- **Schedules, in Rust.** Rust's local server stores schedules but its tick does not fire them (its schedule stub reports a zero next-run time), so cron-driven creation is a TS/Python-only behavior locally.
+
+## The emulation gap you have to name
+
+There is one place where local mode does not merely *omit* a distributed behavior but quietly *diverges* on a durability-relevant one, and — keeping faith with [surfacing the hard parts honestly](/introduction) — an SDK documents it loudly. Call it the zero-dependency-dev asterisk.
+
+**Leases are not refreshed in TypeScript and Rust local mode.** Against the real server, a worker holds a task's lease alive with a periodic heartbeat (`AsyncHeartbeat`, [heartbeat at TTL/2](/tasks-and-the-worker-loop)). In local mode the SDKs install a no-op heartbeat instead — TypeScript and Rust both route `LocalNetwork` to a `NoopHeartbeat` that sends nothing (`resonate.ts`, `resonate.rs`), so the lease is never renewed. There's a sharper edge in TypeScript specifically: its `AsyncHeartbeat` sends `task.heartbeat` with an *empty* task list (`resonate-sdk-ts/src/heartbeat.ts`), because against the real server liveness is looked up by process id — but the in-process server refreshes leases only for the tasks named in the request, so even if that heartbeat were wired to `LocalNetwork` it would refresh nothing. (Rust's `AsyncHeartbeat` does track its acquired tasks and would send them, but local mode installs the no-op heartbeat regardless.) The outcome is the same: in TS/Rust local mode, leases don't get renewed.
+
+The consequence bites a specific shape of code. A task is acquired; its step runs a side effect that takes *longer than the lease TTL* and has not yet recorded a durable result. The one-second tick fires, sees the lease expired, and releases the task back to pending — bumping it out from under the worker. The task is re-dispatched, the worker (now holding a stale version) is told to start over, and the still-running step **re-executes from the top**, side effect and all. With the default minute-long TTL it repeats every minute until the step finally checkpoints a durable promise. Steps that *have* already recorded a durable result are safe — replay fast-paths them — so the failure mode is precisely the un-checkpointed, side-effect-bearing, longer-than-TTL step.
+
+<Callout type="caution" title="Be honest that local mode is not a perfect mirror">
+Two things to carry forward. First, **Python's local mode does not have this gap** — its local store knows its own tasks directly (no wire round-trip) and its heartbeat refreshes leases by scanning the connected process's tasks (`LocalTaskStore.heartbeat`), so leases hold. The gap is specific to the TS/Rust in-process servers. Second, whether the in-process heartbeat *should* be brought to parity with the real server is a tracked open question — don't quietly "fix" it as if settled. The right move for your SDK is to document the asterisk where developers will see it: local mode is for building and crash-testing your workflow's logic, not for trusting the timing behavior of a long, un-checkpointed side effect.
+</Callout>
+
+## Local mode is also your test harness
+
+The same in-process server that lets a developer build with nothing installed is what lets *you* test the SDK with nothing installed. The reference SDKs lean on it as the default fixture: TypeScript's `Resonate` auto-selects `LocalNetwork` when no server URL is configured, and unit tests construct it directly with a no-op heartbeat; Python parameterizes its test suite on `LocalStore` whenever no server host is present; Rust exercises `LocalNetwork` through its inline module tests. Because it exposes `debug.tick` (and `debug.reset`/`debug.snap` in TS), a test can advance time deterministically and assert on exact state — which is exactly the lever the next chapter builds on.
+
+Next: [testing your SDK against the spec](/testing-against-the-spec) — the server invariants your implementation must not violate, and how to find out whether it does.

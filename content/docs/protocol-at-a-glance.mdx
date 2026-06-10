@@ -1,0 +1,92 @@
+---
+title: "The protocol at a glance"
+description: "The moving parts you will implement — promises, tasks, messages, and the loop that ties them together — named once so later chapters can use them."
+hideTitle: true
+---
+
+# The protocol at a glance
+
+The previous chapter made one promise: the developer writes a function, and your SDK makes it survive a crash. This chapter names the machinery that delivers on that — the four moving parts you will be implementing and the loop that ties them together. Nothing here is the full story; every piece gets its own chapter later. The goal is only that when we start writing client code, the words already mean something.
+
+There are four parts: **promises**, **tasks**, **messages**, and the **worker loop**. Hold them loosely for now.
+
+## The server is a message bus, not a database
+
+The first thing to get right is what the server *is*, because it is easy to picture it as a key-value store for promises and then write a client that polls it. That client will work and it will be slow and it will miss the point.
+
+The server is a **message bus** that happens to durably remember things. It holds the promises, yes — but its active job is to deliver work to your workers and to wake them back up when the thing they were waiting on is ready. When a promise is created with a delivery address, the server *sends your worker a message* telling it to start executing. When that work finishes and something else was awaiting it, the server *sends another message* telling the awaiting worker to resume. Your SDK spends most of its life receiving those messages and acting on them.
+
+So the mental model is not "client calls server." It is "two parties exchange messages, and one of them never forgets." Keep that framing; it explains nearly every design decision that follows.
+
+## Promises: the unit of truth
+
+A [durable promise](https://docs.resonatehq.io/spec/programming-model/durable-promise-specification) is a record of a future value that lives in the server's storage rather than in a process's memory. It is `pending` until someone settles it, and then it is settled forever — `resolved` with a value, or `rejected` with an error.
+
+That permanence is the whole trick. Because the outcome of a piece of work is written down in a place that outlives any single process, a fresh process can ask "did this already happen?" and get a truthful answer. Every durable step the developer writes becomes a promise; replay (chapter 7) is nothing more than reading those promises back instead of re-running the work.
+
+A promise has a small set of terminal states, and your SDK has to handle all of them:
+
+| State | Meaning |
+|---|---|
+| `pending` | Not yet settled. The value isn't available. |
+| `resolved` | Completed successfully, carrying a value. |
+| `rejected` | Completed with a failure. |
+| `rejected_canceled` | Settled by an explicit cancel. |
+| `rejected_timedout` | The promise's timeout elapsed before it settled. |
+
+The last one catches people: a promise that times out is not left pending: it transitions to a terminal `rejected_timedout`, and anything awaiting it resumes with that failure. (A promise tagged `resonate:timer` is the deliberate exception — it resolves on timeout instead, which is how durable sleeps are built.) Promises in code, including the value schema and the idempotency keys that make creation safe to retry, are [chapter 4](/promise-lifecycle).
+
+## Tasks: the claim on a promise
+
+A promise is a value waiting to exist. A [task](https://docs.resonatehq.io/spec/system-model/tasks) is the *responsibility for producing it*. The two share an identifier and are created together, but they are distinct objects with distinct jobs: the promise owns the value, the task owns the claim.
+
+Tasks exist only when work has to be delivered to a worker — concretely, when a promise carries a `resonate:target` tag naming a delivery address. That tag is the trigger: create a promise with it and the server creates a task and enqueues an execute message to the address. Create a promise without it and you get a bare promise that someone has to resolve by other means.
+
+A task carries two things your SDK must respect:
+
+- A **version** — an optimistic-concurrency token. Every operation that mutates a task must present the version it expects. If the task has moved on without you, the server answers `409` and you re-fetch and reconsider. This is what makes it safe for a crashed worker's task to be handed to a successor: the original worker, if it comes back, presents a stale version and loses.
+- A **lease** — a deadline by which the worker must prove it is still alive, via heartbeat. Miss the deadline and the server releases the task back to `pending` (bumping the version) so another worker can claim it. Heartbeat is per-process, not per-task: one signal refreshes every task a worker holds.
+
+Versions and leases together are the recovery mechanism — they are how the protocol lets a function outlive the process that started it without ever letting two processes drive it at once. Tasks, the worker loop, and lease management get built in [chapter 5](/tasks-and-the-worker-loop).
+
+## Messages: the wire envelope
+
+Everything the SDK and server say to each other rides a single uniform [envelope](https://docs.resonatehq.io/spec/execution-model/message-passing), the same shape over whatever transport you choose:
+
+```text
+{
+  kind: "promise.create",        // which operation
+  head: { corrId, version },     // correlation id, protocol version
+  data: { ... }                  // operation-specific payload
+}
+```
+
+The response echoes the `kind` and the `corrId` — so a client multiplexing many in-flight requests over one connection can pair each reply to its request — and carries a `status` in its head. The status codes are a small HTTP-shaped set; two of them are load-bearing in ways worth flagging now:
+
+- **`409` Conflict** — a version mismatch, an invalid state transition, or a failed fence. Not an error to retry blindly; a signal that your view of the world is stale.
+- **`300` Continue** — the fast-path answer to `task.suspend`: the promise you were about to wait on has *already* settled, so don't suspend, just continue. You will meet this in [chapter 8](/suspend-resume-settlement); it is the difference between a snappy SDK and one that takes a network round-trip to notice work is already done.
+
+The two canonical messages flowing *to* your worker are **Invoke** ("start executing this") and **Resume** ("the thing you awaited is ready"). Those are the spec's names for the interaction; on the envelope wire the SDKs carry both as a single message kind, `execute`, and tell a fresh start from a resume by what's *in* it rather than by the kind (chapter 5 builds this). Recognizing and dispatching those messages is the heart of the worker loop.
+
+## The worker loop, end to end
+
+Here is the whole protocol in one breath, with everything above in its place:
+
+1. A worker connects to the server and waits for messages on a delivery address.
+2. The server delivers an **Invoke** for a pending task. The worker claims the task with `task.acquire`, presenting the version.
+3. The worker runs the developer's function. Each durable step creates a promise; the worker waits for the server's reply before treating the step as done.
+4. When the function awaits something not yet ready, the worker tells the server `task.suspend` and stops holding the task active — it does not block a thread waiting. The server parks the task and remembers to wake it.
+5. When the awaited promise settles, the server sends a **Resume**. A worker — maybe the same one, maybe not — picks the task back up and continues the function from where it left off, replaying the already-recorded steps rather than re-running them.
+6. When the function returns, the worker settles its own promise with `task.fulfill`, and anything awaiting *it* gets its own Resume.
+
+That loop, made durable and idiomatic, is the entire job. Chapters 3 through 6 build it piece by piece; chapters 7 through 9 handle the genuinely hard parts hiding inside step 5.
+
+<Callout type="info" title="Protocol versioning">
+Every envelope's `head.version` carries the protocol version the request is built against, as a date-stamped string (the current reference SDKs target `2026-04-01`). The server may reject a version it does not support with `400`. The version changes only when the wire contract changes in a breaking way — the promise-API verbs, the envelope shape, and the status taxonomy in this chapter are stable across SDK releases. Pin the version your SDK targets in one constant and send it on every request; don't scatter the literal through your code. Treat the value as something you negotiate against your target server rather than a number you hard-code and forget.
+</Callout>
+
+## What you now have names for
+
+Five words that the rest of the handbook leans on: **promise** (the durable value), **task** (the claim on it, with its version and lease), **message** (the enveloped request/response), **Invoke / Resume** (the two messages that drive a worker, carried on the wire as `execute`), and **suspend / fulfill** (how a worker yields and completes).
+
+Next: [Talking to the server](/talking-to-the-server) — the connection, the transport, and the first real requests over the wire.

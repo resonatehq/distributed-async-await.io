@@ -1,0 +1,100 @@
+---
+title: "Talking to the server"
+description: "The transport layer — the connection abstraction, the request/response envelope, and the poll transport that delivers work to your worker over SSE."
+hideTitle: true
+---
+
+# Talking to the server
+
+This is where the client starts. Before promises, before tasks, before any of the durable machinery, an SDK needs one thing: a way to say something to the server and a way to hear something back. This chapter builds that layer — the transport — and nothing above it.
+
+The transport has two jobs that are worth separating in your mind from the start, because they have opposite shapes:
+
+- **Send** — the SDK initiates. You build a request, hand it to the server, and wait for the response. Classic request/response.
+- **Receive** — the *server* initiates. It pushes you a message — "start this task," "resume this one" — at a time of its choosing, because the work that unblocks you finished on some other worker you've never heard of.
+
+A client that only knows how to send is a client that has to poll, and a client that polls is slow and noticed. Getting receive right — a long-lived channel the server can push down — is most of the work in this chapter.
+
+## The transport abstraction
+
+Both envelope-protocol reference SDKs put a single interface at the boundary so the rest of the SDK never knows which transport is underneath. In TypeScript it is the `Network` interface (`resonate-sdk-ts/src/network/network.ts`):
+
+```ts
+export interface Network {
+  readonly unicast: string;
+  readonly anycast: string;
+  match(target: string): string;
+  init(): Promise<void>;
+  stop(): Promise<void>;
+  send: Send;   // build a request, get a typed response
+  recv: Recv;   // register a callback for pushed messages
+}
+```
+
+Rust draws the same line with the `Network` trait (`resonate-sdk-rs/resonate/src/network.rs`), with an `async fn send` and a `recv` that takes a callback. The two methods that matter are right there: `send` for the requests you originate, `recv` for the messages the server pushes. Everything else — promises, tasks, the worker loop — is written against this interface, so the same SDK runs against a real server, an in-memory [local server](/local-mode), or a future transport you haven't written yet.
+
+<Callout type="info" title="Design the seam first">
+Put the transport behind an interface on day one, even if you only ever implement one. The [local-mode](/local-mode) story, your test suite, and any future transport all depend on the rest of the SDK never reaching past this seam to touch an HTTP client directly. Both reference SDKs that speak the envelope ship at least two implementations of it.
+</Callout>
+
+## The request envelope
+
+Every request the SDK sends is the uniform envelope from [the message-passing spec](https://docs.resonatehq.io/spec/execution-model/message-passing) — a `kind`, a `head`, and operation-specific `data`:
+
+```ts
+{
+  kind: "promise.create",
+  head: { corrId, version },
+  data: { id, timeoutAt, param, tags },
+}
+```
+
+Two fields in the head are load-bearing and easy to get wrong:
+
+- **`corrId`** — a correlation id, unique per request. The server echoes it back unchanged in the response. This is what lets you multiplex many in-flight requests over one connection and still pair each reply to the request that asked for it. TypeScript generates it with `randomUUID()`; Rust uses a timestamped string. The value doesn't matter; the uniqueness and the echo-check do. Both SDKs reject a response whose `corrId` doesn't match the request they're waiting on.
+- **`version`** — the protocol version, a date-stamped string. Both envelope SDKs pin it in one constant (`VERSION` in `resonate-sdk-ts/src/util.ts`, `PROTOCOL_VERSION` in `resonate-sdk-rs/resonate/src/lib.rs`), currently `2026-04-01`, and stamp it on every request. The server may answer `400` to a version it doesn't speak.
+
+The response comes back with the same `kind` and `corrId`, plus a `status` in its head. Build your send path so that a non-success status is a first-class outcome, not an exception you forgot to catch — `409` in particular (covered in chapters 4 and 5) is a routine, expected answer that your higher layers need to reason about, not a crash.
+
+## The poll transport: receiving work over SSE
+
+HTTP send is the easy half — POST the envelope, await the response. The interesting half is receive, and the protocol's portable answer is the **poll transport**: the worker holds open a long-lived HTTP `GET` to the server, and the server streams messages down it as [Server-Sent Events](https://docs.resonatehq.io/spec/execution-model/message-passing#poll-address). The worker never exposes a port; it makes an outbound connection and listens.
+
+Each message arrives as an SSE frame — a line `data: {json}` terminated by a blank line. The receive loop's whole job is: hold the connection, read frames, parse each `data:` payload as a message, and hand it to the registered callback. In TypeScript, `PollMessageSource` (`resonate-sdk-ts/src/network/http.ts`) wraps the standard `EventSource` and fans each parsed frame out to the `recv` callbacks. In Rust, `HttpNetwork` (`resonate-sdk-rs/resonate/src/http_network.rs`) spawns a task that reads the response byte-stream and scans it for `data:`-prefixed lines, because there is no built-in `EventSource` to lean on.
+
+The pattern to copy, in any language:
+
+1. Open a `GET` to the poll endpoint for your group and process id.
+2. Read the stream line by line. On a `data:` line, parse the remainder as a message and dispatch it.
+3. On disconnect, reconnect with backoff — the connection *will* drop, and a worker that doesn't reconnect silently stops receiving work.
+
+Reconnection is not optional polish. Both SDKs back off exponentially on a dropped connection — TypeScript caps around 30 seconds, Rust around 60 — and reset the backoff the moment a connection succeeds. The server holds your task's lease only as long as you heartbeat (chapter 5); a worker that drops its poll connection and never comes back has its in-flight tasks released to other workers, which is correct. A worker that *flaps* — reconnecting in a tight loop with no backoff — is hammering the server during exactly the moments it is least healthy, which is not.
+
+## Addresses: where messages are delivered
+
+For the server to push you work, it has to know where "you" is. That is an **address**, and for the poll transport it takes the form:
+
+```text
+poll://cast@group[/id]
+```
+
+The `cast` is the delivery mode — `uni` for unicast (this specific worker) or `any` for anycast (any worker in the group). The `group` is the logical pool workers register under; the optional `id` is a specific worker within it. Both SDKs derive two addresses for themselves on startup — a unicast `poll://uni@group/pid` and an anycast `poll://any@group/pid` — from the group and process id they were configured with (`resonate-sdk-ts/src/network/http.ts`, `resonate-sdk-rs/resonate/src/http_network.rs`).
+
+The two modes do different jobs, and your SDK surfaces both:
+
+- **Anycast** (`any@group`) is how work gets distributed. A promise targeting `poll://any@workers` is delivered to *one* worker in the `workers` group — the server picks. This is what makes a worker pool a pool: spin up ten, they share the load.
+- **Unicast** (`uni@group/worker-1`) pins delivery to one specific worker. This matters for resumption — when a suspended execution is resumed, the server can prefer the worker that has relevant state warm, falling back to anycast if that worker is gone. An address with both parts (`poll://any@my-service/abc123`) does exactly this: prefer `abc123`, accept anyone.
+
+When the developer invokes a function "on the `workers` group," your SDK turns that group name into a target address — both SDKs have a small resolver that wraps a bare target into `poll://any@target` (`target_resolver` in Rust, `match` in TypeScript). That target string is what rides on the promise's `resonate:target` tag, which — as the next chapters show — is the thing that makes the server create a task and push it to a worker at all.
+
+## A note on Python, and on async
+
+Two of the reference SDKs — TypeScript and Rust — speak the `{kind, head, data}` envelope this chapter describes. The Python SDK currently speaks an older REST protocol: separate endpoints (`POST /promises`, `PATCH /promises/{id}`), idempotency and `strict` carried as HTTP headers, and a different message vocabulary on the poll stream. If you are reading Python source as a reference, read it for its [execution model](/coroutines), not its wire format — the envelope is the shape to build against, and whether Python converges on it is an open protocol question the spec itself flags.
+
+<Callout type="info" title="The transport is where the runtime model shows through">
+This is also the first place the host language's concurrency model asserts itself. Rust's transport is `async fn` end to end — sends are awaited futures, the receive loop is a spawned task on the async runtime. TypeScript awaits `fetch` for sends and takes `EventSource` callbacks for receives on the single-threaded event loop. Python blocks: a dedicated daemon thread holds the SSE `GET` and reads it line by line. None of these is more correct than the others — each is the idiomatic way to hold a long-lived connection in that language. Build the receive loop the way a networking library in your language would, not the way another SDK did it.
+</Callout>
+
+With a transport that can send envelopes and receive pushed messages, you can make the first real requests.
+
+Next: [the promise lifecycle in code](/promise-lifecycle) — creating, reading, and settling durable promises, and the idempotency that makes every write safe to retry.

@@ -1,0 +1,58 @@
+---
+title: "Production concerns"
+description: "What running the SDK you built actually demands — observability, versioning functions in flight, performance levers, and the failure modes operators will see."
+hideTitle: true
+---
+
+# Production concerns
+
+You have built an engine that makes a function survive a crash. The last thing it has to survive is contact with production — and production is where the difference between a working prototype and a library people trust gets settled. This chapter is about the SDK *you* shipped running real workloads: what an operator needs to see when something goes wrong, what happens to in-flight work when you deploy a new version of a function, the levers that decide whether your SDK is fast or merely correct, and the handful of failure modes that will land in someone's logs at 3 a.m. The altitude here is deliberate — this is about running the SDK you wrote, not operating a Resonate cluster. The server's operations are its own story; yours is the library in the worker process.
+
+## Observability: you can see less than you think
+
+The honest starting point is that the reference SDKs give you a foundation for observability, not a finished feature — and knowing exactly where the line falls saves you from promising your users something that isn't there yet.
+
+The TypeScript SDK carries an internal trace model (`resonate-sdk-ts/src/trace.ts`): every execution emits a sequence of structured lifecycle events — `run`, `rpc`, `spawn`, `block`, `await`, `resume`, `suspend`, `return`, `dedup` — with a set of well-formedness predicates that assert the sequence is sane. This is a genuinely useful spine. But it is an internal event model used mostly to validate the engine in tests; it is **not** OpenTelemetry, and there is no OTLP exporter wired to it. The same file's neighbor (`resonate-sdk-ts/src/network/http.ts`) carries a standing note that Prometheus-style metrics — request counts, failure counts, latency histograms — are specified but not yet implemented. Rust takes a different but parallel stance: it instruments the lifecycle with the `tracing` crate (`task acquired`, `starting execution`, `task fulfilled`, `task suspended`, errors with detail), which means an operator who installs a `tracing` subscriber gets structured logs — but the SDK ships no subscriber and no OTel bridge. Python has structured logging at the store boundary and no tracing layer beyond it.
+
+For your own SDK, that points two ways. Build the internal lifecycle-event spine — it costs little, and it is what every higher-level integration hangs off. And treat the OpenTelemetry span export and the metrics histograms as the real, unbuilt work they are, rather than letting your documentation imply a turnkey observability story the code doesn't back. An operator's first question when a workflow stalls is "where is it, and what is it waiting on" — the trace events answer it; make sure they can actually reach those events.
+
+## Versioning functions while work is in flight
+
+This is the production concern most likely to surprise you, because it only shows up the first time you deploy a *change* to a function that has executions already running against the old code.
+
+The mechanism: when an execution invokes a function, the resolved function version is recorded in the task's parameters. When a worker later picks that task up — possibly a fresh worker after a deploy — it looks the function up *by name and version* in its registry. If the worker doesn't have that version registered, the task can't run.
+
+TypeScript and Python both build versioned registries for exactly this: a registry keyed by name *and* version, where you can register several versions of the same logical function and resolve "latest" or a specific one (`resonate-sdk-ts/src/registry.ts`, `resonate-sdk-py/resonate/registry.py`). Rust does not — its registry is keyed by name alone and rejects a duplicate registration outright (`resonate-sdk-rs/resonate/src/registry.rs`); the `version` it carries in options rides along for routing but never participates in dispatch. That divergence is worth stating plainly: **a graceful multi-version migration window is a TS/Python capability today; the Rust SDK has no version dimension in its registry.**
+
+The operational consequence is the same lesson in both worlds. If you deploy new workers that have only the new version registered, every in-flight task that recorded the old version will land on a worker that can't run it — and be dropped or released unrun, its promise left unresolved until it times out. The safe migration is the obvious one once you see the mechanism: keep the old version registered alongside the new one (run both, or register both in one worker) until every in-flight execution at the old version has settled, and only then retire the old registration. If you build a versioned registry, give your users that story explicitly; if you build a name-only one, be honest that a function's shape is effectively frozen while work referencing it is in flight.
+
+<Callout type="caution" title="The signal that a migration went wrong">
+Watch for a spike in function-not-registered errors after a deploy. That is precisely the symptom of in-flight tasks at a version no live worker can serve. It is not a code bug to chase in the function body — it's a deploy-sequencing problem, and the fix is draining or co-registering the old version, not editing the function.
+</Callout>
+
+## Performance: the levers you actually hold
+
+A durable SDK's performance is dominated by how it talks to the server, and there are three levers worth understanding before you reach for cleverness.
+
+**Batching — the lever none of the reference SDKs pull yet.** Every promise and task operation today is its own request: TypeScript, Python, and Rust each issue one HTTP call per operation. A workflow that creates many small durable steps makes that many round-trips. There is local-work flushing inside the coroutine drivers, but no coalescing of *remote* operations into a batched call. This is both a caution — a chatty workflow pays per-step latency — and an opportunity: request batching is a real, unclaimed performance win for a new SDK, provided you preserve the per-operation semantics the engine depends on.
+
+**Connection reuse — make sure you have it.** Rust holds a single pooled `reqwest` client and reuses connections across calls; TypeScript rides the platform's pooled `fetch` and holds a persistent server-sent-events stream for inbound messages with bounded reconnect backoff. Python opens a session per call, so it reuses a connection only within a single retry loop, not across operations. Per-call connection setup is pure overhead on a hot path; pool and keep-alive by default.
+
+**Lease cadence — the one knob with a real tradeoff.** Heartbeat at half the lease TTL is the convention across all three SDKs (`ttl / 2`), and the tradeoff is direct: a shorter TTL recovers a dead worker's tasks faster but heartbeats more often, putting more load on the server; a longer TTL is lighter on the server but leaves a crashed worker's work stranded for longer. Pick the TTL for your workload's longest atomic step (so a healthy step never outruns its lease), and let the heartbeat follow at half of it.
+
+## The failure modes that reach an operator
+
+Four failures account for most of what shows up in production logs, and an SDK author's job is to make each one legible rather than cryptic.
+
+- **Function not registered.** A task references a function name/version no worker has. It is dropped (TypeScript surfaces it as a registry error marked "will drop") or released to be retried by some other worker (Rust's `FunctionNotFound`), and if no worker has it, the promise hangs until timeout. As above, the usual root cause is a deploy, not the function.
+- **Version mismatch (409).** A worker tries to act on a task whose version has moved on — it lost its lease, another worker took over. The [worker loop chapter](/tasks-and-the-worker-loop) covers this: a `409` means *stop driving this execution*, not *retry harder*. Surface it as the benign-but-meaningful event it is, so an operator doesn't read normal recovery as an error storm.
+- **Auth failures.** A missing or rejected token comes back as a server error. The trap worth flagging: in at least the TypeScript taxonomy these are marked retriable and fold into the generic server-error path (`resonate-sdk-ts/src/exceptions.ts`), so an SDK that retries server errors indefinitely will hammer the server forever on a bad credential. Distinguish "retry might help" from "this will never succeed until a human fixes the token," and don't retry the latter into the ground.
+- **Encoding failures.** A value that can't be serialized (or a result that can't be deserialized) fails the step and is dropped. This is a developer-code problem the SDK should report with the offending step's identity, not swallow.
+
+Rust's error enum (`resonate-sdk-rs/resonate/src/error.rs`) and Python's store-error types (`resonate-sdk-py/resonate/errors/`) draw the same lines with different names. Whatever your language, the principle holds: name these failures distinctly, attach the execution and step they belong to, and make the retriable/terminal distinction impossible to get wrong — because the operator reading the log did not write your SDK, and the error message is the only documentation they have at that moment.
+
+## What you actually built
+
+Step back from the production checklist and look at what the whole handbook added up to. You started with a function and a promise that it would survive a crash. You built the client that speaks to the server, the worker loop that holds a lease and never double-drives an execution, the replay that walks a function forward over its own recorded history, the suspend-and-resume that lets a wait cost nothing, and the host-language shape — generator or future — that makes all of it read like ordinary code. The production concerns in this chapter are not a separate subject; they are the same engine, seen from the operator's chair instead of the implementer's.
+
+The thing worth holding onto is the one the [first chapter](/introduction) opened with. A developer wrote a function, and it survived. Everything you built exists to make that sentence true and to keep it feeling unremarkable — and an SDK that earns that reaction, where durability is simply how functions behave and nobody has to think about the machine underneath, is the one that did its job. That is the bar. Build to it.

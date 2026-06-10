@@ -1,0 +1,75 @@
+---
+title: "Encoding, codecs, encryption"
+description: "How a step's arguments and results become the encoded strings a promise carries, the codec that gives them meaning, and the honest state of encryption across the SDKs."
+hideTitle: true
+---
+
+# Encoding, codecs, encryption
+
+A promise stores a value, but the server has no idea what your developer's value *is* — it never deserializes it, never inspects it, never runs their code. From the server's side a promise's payload is an opaque string it stores and hands back byte-for-byte. That opacity is deliberate, and it pushes a job entirely onto your SDK: turn a native value — a function's arguments, its return, a rejection — into a string on the way out, and back into a native value on the way in. The thing that does that is the **codec**, and this chapter is about building one, plus an honest accounting of where encryption actually stands.
+
+## `data` is a string; `headers` give it meaning
+
+Recall the two-field shape a promise's `param` and `value` each carry: `data` and `headers`. The contract is small and worth stating exactly:
+
+- **`data`** is an *encoded string* (or absent). The Rust type says it plainly in its own doc comment: on the wire, `data` is a base64-encoded JSON string; only after the codec decodes it does `data` hold a real value (`Value` in `resonate-sdk-rs/resonate/src/types.rs`). TypeScript's `Value` (`resonate-sdk-ts/src/network/types.ts`) and Python's `DurablePromiseValue` (`resonate-sdk-py/resonate/models/durable_promise.py`, where `data` is typed `str | None`) carry the same idea.
+- **`headers`** is a string→string map that travels *alongside* `data` and tells the codec how to read it — content type, encoding, format markers. This is the forward reference the [promise lifecycle](/promise-lifecycle) chapter left open: headers exist so that decoding doesn't have to guess.
+
+The codec is the only component that understands the relationship between the two. It encodes a native value into `data` (and, optionally, writes `headers`), and on the way back it reads `headers` to decide how to turn `data` back into a value.
+
+## The default pipeline
+
+All three SDKs build `data` from the same two transforms — **JSON serialization** (portable) and **base64** (safe to carry as a string) — with an optional **encryption** step layered in. The exact layering differs, and it's worth being precise: Rust encrypts the JSON *before* base64 (`Rust value → JSON → encrypt → base64`), while TypeScript base64-encodes first and encrypts the result (`value → JSON → base64 → encrypt`). With the default no-op encryptor the distinction is invisible; it only matters once a real cipher is in play, and it's the kind of thing to pin down rather than assume uniform. Decoding runs each SDK's pipeline in reverse.
+
+TypeScript wraps this in a single `Codec` class whose internal `JsonEncoder` does the JSON-and-base64 work and is careful about JavaScript's rough edges — it serializes `Infinity`/`-Infinity` and `Error`/`AggregateError` instances through sentinels so they survive a round-trip (`resonate-sdk-ts/src/codec.ts`). Its `encode` chains the JSON encoder into the encryptor; `decode` reverses it; and `decodePromise` decodes both `param` and `value` while preserving the original `headers`. Rust's `Codec` (`resonate-sdk-rs/resonate/src/codec.rs`) does the same in trait form — its doc comment spells the order out: "Rust value → JSON → encrypt → base64 → `Value`."
+
+Python takes a more compositional route, which is instructive precisely because it's built from small pieces. Its `Encoder` is a structural protocol — `encode`/`decode`, generic over input and output types (`resonate-sdk-py/resonate/models/encoder.py`) — and the SDK ships a handful that *compose*: `JsonEncoder`, `Base64Encoder`, `JsonPickleEncoder`, `HeaderEncoder` (writes a value into a `headers` key), `NoopEncoder`, plus two combinators — `PairEncoder` (run two encoders, produce a `(headers, data)` pair) and `CombinedEncoder` (pipe one encoder's output into the next). The default application encoder is assembled from these (`Options.get_encoder` in `resonate-sdk-py/resonate/options.py`):
+
+```text
+PairEncoder(
+  HeaderEncoder("resonate:format-py", JsonPickleEncoder()),  # → headers
+  JsonEncoder(),                                             # → data
+)
+```
+
+So a default Python value is written *twice*: a portable JSON form into `data`, and a Python-specific jsonpickle form into a `resonate:format-py` header. That second write is the seed of the cross-language caveat below.
+
+<Callout type="info" title="Encode where you can read; decode where you must">
+A clean division to carry into your own SDK: the *application* codec turns the developer's native values into `(headers, data)`, and a lower *transport* encoder handles the base64 wrapping at the network boundary (Python uses `Base64Encoder` here in its stores; TS and Rust fold base64 into the one codec). Keeping the application transform separate from the transport wrapping is what lets a developer swap in a custom value codec without touching how bytes ride the wire.
+</Callout>
+
+## A pluggable codec
+
+The reason the codec is a named, swappable component and not a hardcoded `JSON.stringify` is that JSON is not always enough — a value might need a domain-specific format, a more compact binary encoding, or compression. So the codec is injected at construction (`new Resonate({ encryptor })` in TS, `ResonateConfig` in Rust, a custom `Encoder` in Python's `Options`), and your SDK should expose the same seam. Two design notes the reference SDKs make concrete:
+
+- **Encode both directions of every field.** `param` (arguments) and `value` (result, including a rejection) all flow through the codec. A custom codec that handles arguments but forgets rejections will round-trip success and corrupt failure.
+- **Carry `headers` so decode never guesses.** Python's `HeaderEncoder` exists for exactly this — when a value is encoded in a non-default way, a header records which way, and decode dispatches on it. A codec that writes a custom `data` format without a header marking it has built a thing only it can read, and only as long as nobody changes it.
+
+## Encryption: the honest state of it
+
+It is tempting to present encryption as a solved, uniform feature. It is not, and the handbook's habit of [surfacing the hard parts honestly](/introduction) applies — so here is exactly what ships.
+
+**TypeScript and Rust define an encryption seam and ship no cipher.** Each has an `Encryptor` abstraction — a TS `Encryptor` interface (`resonate-sdk-ts/src/encryptor.ts`) and a Rust `Encryptor` trait (`resonate-sdk-rs/resonate/src/codec.rs`) — wired into the codec as an injectable dependency. But the only implementation either ships is a `NoopEncryptor` passthrough. There is no AES, no ChaCha, no key management. Encryption is *possible* in TS and Rust by supplying your own `Encryptor`; it is not *provided*.
+
+**Python ships no encryption seam at all.** There is no `Encryptor` protocol, no encrypt/decrypt step in the pipeline. A developer who wants encryption in Python would have to smuggle it inside a custom `Encoder`, which is architecturally awkward because the encoder interface isn't scoped to it.
+
+And the two seams that *do* exist are not even the same shape:
+
+| SDK | Encryption seam | Cipher shipped | Operates on |
+|---|---|---|---|
+| TypeScript | `Encryptor` interface | none (`NoopEncryptor`) | the whole `Value` — can rewrite `headers` too |
+| Rust | `Encryptor` trait | none (`NoopEncryptor`) | raw bytes only — cannot touch `headers` |
+| Python | none | none | — |
+
+That `Value`-vs-bytes difference matters for anyone who needs to annotate encrypted data (a key id for rotation, an algorithm marker): the TS seam can write that into `headers` in the same step; the Rust seam can't reach `headers` without changing the codec itself. **Do not claim parity here.** If your SDK offers encryption, say which of these shapes it takes and what it actually ships, rather than implying a uniform feature the reference SDKs don't have.
+
+## Cross-language compatibility and versioning
+
+Because JSON-then-base64 is the shared default, a value written by one SDK is *generally* readable by another — that's the payoff of the common pipeline. Two seams in that compatibility are worth knowing:
+
+- **Language-specific encoders don't travel.** Python's default jsonpickle header (`resonate:format-py`) carries Python class information (`{"py/object": ...}` markers) that only Python can rehydrate. A TS or Rust reader ignores the header and reads the plain-JSON `data` fallback — which is lossy for rich Python types. jsonpickle is Python-to-Python only; lean on the JSON `data` for anything cross-language.
+- **Error shapes differ.** TS and Rust serialize errors through a `__type` discriminator; Python uses an `__error__` key. An error object encoded by one SDK won't necessarily rehydrate *as an error* in another. If cross-language rejection fidelity matters to you, pin a shared error encoding rather than assuming one.
+
+On **versioning encoded data over time**, the honest answer is that none of the SDKs solves it: there is no schema-version field in `headers`, no forward/backward-compatibility guard, no migration path for old payloads. This is a real gap, and a place your SDK can do better deliberately — reserving a `headers` key for a codec/schema version costs nothing now and is the only inexpensive moment to add it. If you skip it, a value encoded today is a value you can never safely change the shape of, and the first time you try, replay over old promises will hand your decoder bytes it no longer understands.
+
+Next: [local mode for development](/local-mode) — running the whole engine in-process so a developer can build against it with nothing else installed, and the one emulation gap you have to be honest about.

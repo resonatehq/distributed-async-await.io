@@ -1,0 +1,66 @@
+---
+title: "Replay and deterministic execution"
+description: "The heart of durable execution — replaying a function from its recorded promises, the deterministic ids that make it work, and the contract that keeps it correct."
+hideTitle: true
+---
+
+# Replay and deterministic execution
+
+This is the chapter the rest of the handbook has been building toward. Everything so far — promises, tasks, the worker loop, the registry — exists to make this one thing possible: a function that crashed halfway through can be re-run from the top by a fresh process and *not redo the work it already did*. That mechanism is **replay**, and it is the heart of durable execution.
+
+The idea is almost suspiciously simple. To resume a function, the SDK runs it again — from the beginning. As it runs, each durable step asks the server "has this step already happened?" For steps that ran before the crash, the answer is yes, and the recorded result is handed straight back without re-executing. For steps that hadn't run yet, the answer is no, and they execute for real. The function walks forward over its own history until it reaches the point it died, then keeps going into new territory.
+
+That simplicity rests on one demanding requirement, and most of this chapter is about earning it: the second run has to line up *exactly* with the first.
+
+## Replay is re-execution, not a journal scan
+
+It's worth being precise about what replay is, because there's a tempting wrong model. The SDK does not load a journal of past steps and skip ahead. It *re-executes the function* — actually calls it again — and the re-execution naturally skips completed work because each completed step resolves instantly from its recorded promise.
+
+The "has this happened?" question is just `promise.create`. Recall from chapter 4 that creating a promise with an id that already exists returns the existing promise. So when the re-running function reaches its third step and tries to create the promise for it, one of two things happens:
+
+- **The promise exists and is settled** — this step ran before the crash. The create returns the recorded value, and the SDK feeds it straight back into the function as that step's result. No work is redone.
+- **The promise doesn't exist, or is still pending** — this step is new, or was in flight. The SDK runs it for real.
+
+All three reference SDKs implement exactly this. In TypeScript and Python, a `promise.create` that comes back already-settled feeds its stored value into the generator's next `.next()`/`.send()` call (`Coroutine.exec` in `resonate-sdk-ts/src/coroutine.ts`, `Computation` in `resonate-sdk-py/resonate/scheduler.py`). In Rust, the already-settled promise resolves the awaited future immediately from a preload cache (`Effects::create_promise` in `resonate-sdk-rs/resonate/src/effects.rs`). The shape differs; the mechanism is identical — recorded promises stand in for re-execution.
+
+<Callout type="info" title="Preload makes replay inexpensive">
+A naive replay would round-trip to the server for every already-settled step — slow, for a function with a long history. The protocol avoids it with **preload**: when a worker acquires or resumes a task, the server hands back the already-settled promises in this execution's branch, and the SDK serves the replay from that cache instead of re-fetching. The envelope SDKs receive a `preload` array on acquire; you'll see it again in chapter 8, where it's what makes resumption fast.
+</Callout>
+
+## Deterministic ids: how a step finds its own past
+
+Here is the crux. Replay works by matching each step to the promise it created last time. The match is by **promise id**. So the second run has to generate the *same id* for the *same step* as the first run did — or step three of the replay will look up step three's id, find nothing, and re-execute work that already happened.
+
+The SDKs guarantee this by deriving child ids deterministically from the execution's structure, not from anything random or external. The scheme is a per-execution counter appended to the parent id: the durable steps come out as `parent.0`, `parent.1`, `parent.2`, … in the order the function reaches them (TypeScript and Rust count from 0, Python from 1 — the base doesn't matter, the determinism does). Same function, same path, same sequence of ids — every time.
+
+- TypeScript: an `InnerContext.seq` field, formatted as `` `${this.id}.${this.seq}` `` and incremented per step (`resonate-sdk-ts/src/context.ts`).
+- Python: a `_counter` producing `` f"{self._id}.{self._counter}" `` (`resonate-sdk-py/resonate/resonate.py`).
+- Rust: an `AtomicU32` seq formatted the same way (`resonate-sdk-rs/resonate/src/context.rs`).
+
+This is why deterministic id generation isn't a detail — it's the load-bearing wall. The counter resets to zero/one on each run, so the *nth* durable step always gets the *nth* id, and replay can find it. Which leads directly to the one rule your developers have to follow.
+
+## The determinism contract
+
+The counter only lines up if the function takes **the same path** on replay — reaches the same durable steps, in the same order. That is the determinism contract, and it's the one constraint durable execution genuinely imposes on the code developers write.
+
+Concretely: the orchestrating code — the part *between* durable steps — must be a pure function of the recorded results. If a function branches on `Math.random()`, or the current time, or a value it read directly from a database, then on replay it might branch the other way, take a different step as its "second" step, generate a different id, and desynchronize from its own history. The recorded promises stop lining up, and durability silently breaks.
+
+The resolution is the rule that makes the whole model usable: **anything nondeterministic must itself be a durable step.** Don't call `random()` in the orchestration; call it *through* a durable step, so its result is recorded the first time and replayed every time after. The reference SDKs provide exactly these wrapped primitives:
+
+- **Time** — TypeScript's `ctx.date.now()` and Python's `ctx.time.time()` are durable local steps: the timestamp is recorded once and returned identically on replay (`resonate-sdk-ts/src/context.ts`, `resonate-sdk-py/resonate/resonate.py`).
+- **Randomness** — TypeScript's `ctx.math.random()` and Python's `ctx.random` are likewise durable steps.
+- **Sleep** — `ctx.sleep` is a durable timer promise (the `resonate:timer` tag from chapter 4): it suspends durably and, on replay, returns instantly because the timer promise is already settled.
+
+Rust takes a narrower stance — it does not ship `ctx.now()` or `ctx.random()` wrappers, leaving the developer to route nondeterminism through `ctx.run` explicitly, and uses `ctx.sleep` for durable delays. The principle is the same in every language: **nondeterminism enters only through a recorded step.** The general-purpose tool is the local durable call — `ctx.run` / `ctx.lfc` — which records *any* computation's result as a promise so replay can skip it. That's the escape hatch you give developers for reading a database, calling an API, or anything else the orchestration must not redo.
+
+## Local steps are durable too
+
+It's worth making explicit, because it surprises people: a *local* step — a function that runs in-process, no remote dispatch — is still backed by a durable promise. `ctx.run` in all three SDKs creates a promise tagged `resonate:scope: "local"`, executes the function, and settles the promise with its result (`resonate-sdk-ts/src/context.ts`, `resonate-sdk-py/resonate/scheduler.py`, `resonate-sdk-rs/resonate/src/context.rs`). The locality is about *where it runs*, not *whether it's recorded*. This is what lets replay skip a local computation just as cleanly as a remote one — the recorded promise is authoritative either way.
+
+The flip side, which your SDK should make legible: a step that is *not* durable (an SDK may allow opting out for lightweight, side-effect-free work) is not replay-safe. It re-runs on every replay. That's a fine, deliberate optimization for a pure helper, and a quiet bug if a developer reaches for it around a side effect. Make the durable path the default and the non-durable path the conscious choice.
+
+## A note on detection
+
+You may have noticed what's missing: none of the reference SDKs actively *detect* a determinism violation. There's no runtime guard that fires when the second run diverges from the first. The protection is purely structural — get the ids to line up and replay is correct; break the contract and replay silently maps steps to the wrong promises. This is a deliberate simplicity, and it shifts weight onto two things your SDK *can* control: making the deterministic path the easy, default path (wrapped time/random/sleep, durable-by-default steps), and documenting the contract clearly. A developer who routes all nondeterminism through durable steps never has to think about replay at all — which is exactly the experience chapter 1 promised. Surfacing violations is a quality-of-life feature you can add later; getting the structure right is the requirement.
+
+Next: [suspend, resume, and the settlement chain](/suspend-resume-settlement) — what happens at the boundary where a function stops running and waits, and how the value it was waiting for finds its way back in.

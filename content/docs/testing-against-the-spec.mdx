@@ -1,0 +1,62 @@
+---
+title: "Testing your SDK against the spec"
+description: "The server invariants your implementation must never violate, how to find out whether it does, and why the shipped server — not the prose — is the final word."
+hideTitle: true
+---
+
+# Testing your SDK against the spec
+
+A durable execution SDK has an unusually demanding correctness bar: a bug doesn't just produce a wrong answer, it can silently double-execute a side effect or lose work across a crash — failures that don't reproduce on a happy-path run and don't show up until production hits the exact interleaving that triggers them. Ordinary unit tests don't reach this. This chapter is about the testing that does: anchoring on the protocol's named invariants, replaying scenarios for conformance, injecting the faults the model is supposed to survive, and — the lesson that outranks all of them — checking your assumptions against the *shipped* server rather than the prose about it.
+
+## The server invariants are your test oracle
+
+The protocol's [task model](/tasks-and-the-worker-loop) names a set of invariants the server maintains over every task at all times. They are the most useful thing to test against, because they are precise, they are total (they hold after *every* operation, not just at the end), and they translate directly into assertions. The [specification's task model](https://docs.resonatehq.io/spec) states seven:
+
+1. **Every task has a corresponding promise** — no orphan tasks.
+2. **Every pending task has a retry timeout** — so a task that's claimable but unclaimed will eventually be re-offered.
+3. **Every acquired task has a lease** — so a worker that dies is detected.
+4. **Every suspended task has at least one callback** registered on a promise it awaits — so it can be woken.
+5. **No suspended task has an already-consumed callback** — a settled promise can't leave a task parked forever.
+6. **No suspended task has a timeout** — suspension is open-ended; it waits on a settlement, not a clock.
+7. **No fulfilled task has a timeout** — a terminal task holds nothing.
+
+The way to use these is to drive your SDK through a sequence of operations, snapshot the server state after *each* one, and assert all seven hold on every snapshot. A violation pins the bug to the operation that produced it. This is exactly how the reference conformance tooling works — it replays operation sequences and checks an invariant set after every step — and it's the shape your own conformance suite should take.
+
+<Callout type="caution" title="The invariant names read backwards — assert the description, not the name">
+Several of these invariants carry *formal identifier names in the spec source* that state the *opposite* of the rule — a `no-timeout`-style name guarding "must have a timeout," and vice versa. (The plain descriptions above are right-way-round; it's the spec's symbol names that invert.) If you write your assertions from the names alone you will get them inverted and your tests will pass on broken behavior. Assert the *described* condition. This is a small thing that has bitten reviewers, which is the whole reason it's worth a callout.
+</Callout>
+
+## Verify against the shipped server, not the prose
+
+Here is the lesson that matters most, learned the hard way: **the specification text and even a separate spec repository can drift from what the server actually does, and the shipped server is the tiebreaker.** When an invariant or wire detail is load-bearing for your test, confirm it against the server's source — the state machine in `resonate/src/oracle.rs` (the `op_task_*` and `op_promise_*` handlers) — not against a prose restatement that may lag the code.
+
+A concrete example sits inside invariant 3. The spec's diagram implies a task's version increments *at the moment its lease expires* and it returns to pending. The shipped oracle instead carries the task back to pending at its current version and increments on the *next acquire* (`op_task_acquire` in `resonate/src/oracle.rs`). The end guarantee — that no two workers ever hold the same live version, so a stale worker's write is rejected — holds either way; but a conformance test that asserts "version incremented the instant the lease lapsed" will fail against the real server even though the server is correct. The fix is not to loosen the test; it's to write the assertion against what the server actually guarantees (the version *will* have advanced before anyone re-acquires) and to treat a mismatch between prose and code as a documentation bug to flag, not a server bug to work around. A second example cuts the other way, and it's the trap in its purest form. The TypeScript in-process [local server](/local-mode) rejects a task-create whose promise lacks a `resonate:target` tag — but the shipped oracle does *not* (`op_task_create` in `resonate/src/oracle.rs` only validates the tag's address format *when the tag is present*; a tag-absent create passes). A conformance test written against the convenient local model would assert a rejection the real server never makes, and fail an SDK that is actually correct. The model is not the oracle. Verify against the server.
+
+The strongest version of this discipline is *differential* testing: run the same operation sequence against your SDK-driven [local server model](/local-mode) and against a live shipped server, snapshot both, and diff. Any divergence is either a bug in your implementation or a drift in your model — both worth knowing. The reference tooling does exactly this, running an in-process model and a real server side by side under identical seeds.
+
+## Replaying recorded scenarios
+
+Conformance, concretely, is a corpus of operation sequences — `promise.create`, `task.acquire`, `task.suspend`, settlements, timeouts — replayed against your implementation with the invariant check after each step. Two flavors are worth building:
+
+- **Hand-written transition scenarios** that target specific tricky paths: the [`300`-continue fast path](/suspend-resume-settlement), a lease expiring mid-step, an idempotent re-create, a suspend that races a settlement. Each is a small, named, deterministic sequence whose expected end state you assert exactly.
+- **Generated sequences** — a fuzzer that emits random-but-valid operation streams against a seed and checks the invariants on every snapshot. This is the closest thing to property-based testing the protocol invites: *for all valid operation sequences, the invariants hold.* It catches the interleavings you wouldn't think to write by hand.
+
+<Callout type="info" title="A conformance suite is a goal, not yet a shared artifact">
+A reusable, cross-SDK conformance corpus — the same recorded scenarios every implementation runs — is the natural endpoint of this chapter. Treat the *idea* as the target to build toward; don't assume a public, drop-in suite you can point your CI at today. Until one is published, your conformance corpus is something you grow alongside your SDK, anchored on the invariants above and the shipped server as oracle.
+</Callout>
+
+## Injecting the faults the model is supposed to survive
+
+Durability is a claim about behavior *under failure*, so the tests that matter most cause failures on purpose. The reference SDKs take two complementary approaches, both worth borrowing.
+
+**Deterministic simulation.** Python's simulator (`resonate-sdk-py/resonate/simulator.py`) runs the whole system — a server and one or more workers — as a discrete-event loop over a seeded random source and a step-advanced clock. It drops a fraction of messages, delivers them out of order, shuffles each component's inbox, and occasionally removes a worker entirely to model a crash. Because everything derives from the seed, a failing run is perfectly reproducible: capture the seed, replay the exact interleaving, debug it. The assertion is invariance of the *outcome* — across all the chaos, a workflow's final result must be the one correct result. This is the highest-value test you can write for a durable SDK, because it exercises the recovery machinery against the adversary it was built for.
+
+**Targeted stubs.** Rust's test utilities (`resonate-sdk-rs/resonate/src/test_utils.rs`) take a finer-grained route: a `StubNetwork` that can be told to return a `300` redirect on suspend (exercising the already-settled fast path), to settle a promise out from under a running execution (modeling an external completion mid-step), and that records every request it received so a test can assert exact wire-format correctness. Where the simulator proves the system survives chaos, the stubs prove individual branches — the suspend-races-settlement path, the redirect path — are taken correctly.
+
+Neither reference SDK uses a formal property-testing framework (no QuickCheck/Hypothesis/proptest with shrinking); the seeded simulator and the fuzzer fill that role. If your language has good property-testing tooling, pointing it at determinism and idempotency — *re-running a step yields the same recorded result; replaying a completed prefix changes nothing* — is a worthwhile addition, not a replacement for simulation.
+
+## Building confidence before you ship
+
+Stack these and you have a real correctness story: invariant assertions after every operation, hand-written scenarios for the tricky transitions, a seeded fuzzer for the ones you didn't think of, fault injection for the recovery paths, and a differential check against the shipped server to catch drift in your own model. The throughline is the one this chapter opened on — **trust the running server over any description of it.** An SDK that passes its own tests against a model that has drifted from the real server passes nothing that matters. Anchor on the invariants, verify against `oracle.rs` when a detail is load-bearing, and let the shipped server have the last word.
+
+Next: [production concerns](/production-concerns) — what running the SDK you built actually demands, from observability to versioning functions while work is in flight.

@@ -1,0 +1,118 @@
+---
+title: "Coroutines in your language"
+description: "Expressing a durable function idiomatically — sync generators or async futures — and how the SDK drives it, compared across the reference SDKs."
+hideTitle: true
+---
+
+# Coroutines in your language
+
+Everything up to here has treated "the durable function" as a thing the worker drives one step at a time — run it until it blocks, suspend, resume, replay. This chapter is about the *thing being driven*: how a developer's function is shaped so that it can be paused at a durable step and resumed later, and how your SDK steps it forward. This is where the host language stops being a backdrop and starts dictating the design, because the mechanism that lets a function pause mid-flight and hand control back to your runtime is the single most language-specific decision in the whole SDK.
+
+[Earlier chapters](/replay-and-determinism) deferred the deep treatment to here, and named the split they were deferring: **TypeScript and Python express a durable function as a sync generator; Rust expresses it as an async future.** Neither is more correct. Each is simply how durable suspension expresses itself naturally in that language's runtime, and your first real design decision is which shape fits the grain of yours.
+
+## The same step, two shapes
+
+A durable step is a point where the function stops, hands a description of what it wants to your SDK, and waits to be handed a result back. The whole question is what language construct *is* that stop-and-hand-back.
+
+In a generator language it is a `yield`. The developer writes a generator function and yields a description of each durable call; the SDK receives the yielded value, does the durable work, and resumes the generator by feeding the result back in:
+
+```ts
+// TypeScript — a durable step is a yield
+function* transfer(ctx: Context, args: Args): Generator<any, Result, any> {
+  yield ctx.run(debit, args.from, args.amount);   // durable step
+  const ok = yield ctx.run(credit, args.to, args.amount); // durable step → value
+  return { ok };
+}
+```
+
+In an async language it is an `.await`. The developer writes an ordinary `async fn`, and each durable call is awaited like any other future:
+
+```rust
+// Rust — a durable step is an .await
+#[resonate::function]
+async fn transfer(ctx: &Context, args: Args) -> Result<Outcome> {
+    ctx.run(debit, DebitArgs { /* … */ }).await?;          // durable step
+    let ok = ctx.run(credit, CreditArgs { /* … */ }).await?; // durable step → value
+    Ok(Outcome { ok })
+}
+```
+
+The two read almost the same on the page. The difference is *who holds the pause*. A `yield` hands control out of the function to whatever is iterating it — your SDK. An `.await` hands control to the async runtime, and your SDK has to arrange to be the thing the runtime hands it to. That difference is the rest of the chapter.
+
+<Callout type="info" title="A TypeScript durable function is a sync generator, not an async one">
+It is `function*`, not `async function*`. The generator yields synchronously between steps; it never sees a JavaScript `Promise`. All the asynchronous work — talking to the server, awaiting local children — happens in the SDK's driver loop *around* the generator, not inside it. This is deliberate: keeping the developer's function synchronous-between-yields is what lets the SDK take complete control of when it advances, which is what replay needs.
+</Callout>
+
+## Driving a generator (TypeScript and Python)
+
+In a generator model your SDK owns a loop that steps the generator, inspects what came out, acts on it, and steps again. The generator is inert between calls; nothing happens until you call `.next()` (TS) or `.send()` (Python).
+
+TypeScript's driver is `Coroutine.exec` (`resonate-sdk-ts/src/coroutine.ts`). It instantiates the generator once and runs a trampoline: each turn calls `.next(input)` on the generator, reads the yielded value, and — depending on whether it is a local invocation, a remote one, or an await on an existing handle — either creates the durable promise and feeds the result back as the next `input`, or, if the awaited promise is still pending, returns a `Suspended` result and lets go (the [suspend/resume](/suspend-resume-settlement) machinery takes it from there). A yielded call is mediated by a `Decorator` (`resonate-sdk-ts/src/decorator.ts`) that translates each `Yieldable` — the union of `LFI`, `LFC`, `RFI`, `RFC`, and a future handle — into an internal instruction the loop acts on.
+
+Python's driver is the scheduler (`resonate-sdk-py/resonate/scheduler.py`), which advances each coroutine through `Coroutine.send` (`resonate-sdk-py/resonate/coroutine.py`). The shape of `send` is the whole model in miniature: it is called with `None` on the first step, with `Ok(value)` to feed back a resolved result, or with `Ko(error)` to throw an exception *into* the generator at the yield point — which is how a failed durable step surfaces as an ordinary `try`/`except` in the developer's code. What comes back out is the next thing the generator wants: a local invocation, a remote one, an await handle, or a terminal "I'm done."
+
+Both SDKs share a small, important trick. The developer writes `yield ctx.run(...)` and expects to get the step's *value* back — but "create the promise" and "await its result" are two different operations internally. The generator drivers fuse them: yielding a "call" (a collect-style invocation) auto-inserts the await, so the developer's single `yield` produces a value in one step. TypeScript tracks this with a `pendingCall` marker in the decorator; Python sets a `skip` flag in `Coroutine.send`. Same idea, both hide the two-step dance behind one `yield`.
+
+## Driving a future (Rust)
+
+Rust has no generator to step. A durable function is a plain `async fn`, and the `#[resonate::function]` macro (`resonate-sdk-rs/resonate-macros/src/lib.rs`) turns it into an implementation of the `Durable` trait (`resonate-sdk-rs/resonate/src/durable.rs`), whose `async fn execute` *is* the developer's body. Your SDK drives it by `.await`-ing that future on the async runtime, not by stepping it.
+
+So how does an `.await` on an unsettled durable call pause the function without blocking a thread? The answer is that a not-ready durable call resolves its future *immediately* — with an error that means "suspend." A remote call whose promise the server reports as still `Pending` returns `Err(Error::Suspended)` from its future (`RpcTask::into_future` in `resonate-sdk-rs/resonate/src/context.rs`; `RemoteFuture` in `resonate-sdk-rs/resonate/src/futures.rs`). That error propagates up through the developer's `.await?` calls and out of `execute`, where the task driver in `resonate-sdk-rs/resonate/src/core.rs` catches it, collects the remote dependencies the function registered on the way out, and suspends the task. On resume, the whole `execute` future is run again from the top — and this time the previously-pending calls find their promises already settled (via preload), so their futures resolve with real values and the function walks forward to the next unsettled point.
+
+<Callout type="info" title="Two suspension mechanisms, one contract">
+The generator SDKs suspend by *returning a value from the driver loop* (`Suspended`) — the SDK is the iterator, so it just stops iterating. Rust suspends by *propagating an error up the future chain* — the SDK is not the runtime, so it signals out-of-band and lets the runtime unwind. Both re-run the function from the top on resume and rely on replay to fast-path the completed steps. The host-language plumbing is entirely different; the durable-execution contract is identical.
+</Callout>
+
+This is also why the [determinism contract](/replay-and-determinism) lands the same way in every language: re-running from the top only works if the function reaches the same durable steps in the same order, whether those steps are `yield`s the SDK counts or `.await`s the runtime re-drives.
+
+## The invocation surface
+
+What a developer actually calls to make a durable step has two independent axes, and getting their names right is part of feeling idiomatic.
+
+- **Local vs. remote** — does the step run *in this process* (executed against your local function registry, tagged `resonate:scope: "local"`) or get dispatched as a promise *the server routes to any worker* in the target group (`resonate:scope: "global"`)?
+- **Invoke vs. collect** — does the call return a *handle* immediately so the function can start more work before awaiting any of it, or does it *auto-await* and hand back the result value directly?
+
+TypeScript and Python name the four combinations explicitly — `lfi`, `lfc`, `rfi`, `rfc` (local/remote × fire-invoke/fire-collect) — with friendly aliases for the common forms: `ctx.run` is the local collect, `ctx.rpc` the remote collect, and the invoke forms are `beginRun`/`beginRpc` in TypeScript (`resonate-sdk-ts/src/context.ts`) and the snake-case `begin_run`/`begin_rpc` in Python (`resonate-sdk-py/resonate/resonate.py`). The "collect" forms auto-await; the "invoke" forms return a future/promise handle you await later with a second `yield`.
+
+Rust uses a builder shape instead of four names: `ctx.run(f, args)` and `ctx.rpc("name", args)` each return a task object that is *both* awaitable and spawnable (`resonate-sdk-rs/resonate/src/context.rs`). Awaiting it directly (`.await`) is the collect form; calling `.spawn().await?` first gives you a handle (the invoke form) you can await separately. The mapping is exact even though the vocabulary differs:
+
+| Concept | TypeScript / Python | Rust |
+|---|---|---|
+| Local, get a value | `ctx.run` (`lfc`) | `ctx.run(f, a).await` |
+| Local, get a handle | `beginRun` / `begin_run` (`lfi`) | `ctx.run(f, a).spawn().await?` |
+| Remote, get a value | `ctx.rpc` (`rfc`) | `ctx.rpc("f", a).await` |
+| Remote, get a handle | `beginRpc` / `begin_rpc` (`rfi`) | `ctx.rpc("f", a).spawn().await?` |
+| Fire-and-forget | `ctx.detached(...)` | `ctx.detached("f", a).spawn().await?` |
+
+The "invoke" / handle forms are what make concurrency expressible.
+
+## Composing concurrent durable calls
+
+Sequential durable steps are the easy case — `yield` one, get its value, `yield` the next. Concurrency is the reason the invoke forms exist: start several durable calls *before* awaiting any of them, then collect.
+
+In the generator SDKs, fan-out is a sequence of invoke-style yields that each return a handle, followed by a sequence of awaits on those handles:
+
+```ts
+// TypeScript — fan-out then fan-in
+const a = yield ctx.beginRpc("fib", n - 1); // handle, not value
+const b = yield ctx.beginRpc("fib", n - 2); // handle, not value
+return (yield a) + (yield b);               // await both
+```
+
+Python expresses the same with `ctx.rfi(...)` handles awaited later. Each invoke creates the promise (and, for remote calls, dispatches the work) immediately; the awaits then block on results that are already in flight. Because all the calls are created before any await, the work overlaps.
+
+In Rust the same intent rides the async runtime's own combinators. `.spawn()` hands back a `DurableFuture` backed by a channel, so two spawned calls run concurrently and you await both; `tokio::join!` over two `ctx.run(...)` tasks composes them cooperatively. The structured-concurrency story is the language's, not the SDK's — your job is only to make the durable task type compose with it.
+
+`detached` is the deliberate exception to all of this: a fire-and-forget call whose result the parent never awaits, used when you want to *start* durable work whose lifetime is independent of the caller. It is not part of structured fan-out/fan-in; it leaves a promise behind and returns.
+
+## Choosing the surface your community expects
+
+The mechanism is dictated by the language; the *surface* is your call, and it is worth making deliberately. A few things the reference SDKs got right and that a new SDK should weigh:
+
+- **Match the language's blocking idiom exactly.** If durability does not ride the construct developers already use to wait for things — `await`, `yield`, the futures combinators — every durable call will read as foreign, and the "feels like a normal function" promise breaks.
+- **Make the common case one token.** Auto-awaiting "collect" calls so the default is `value = yield ctx.run(...)` (not a manual two-step invoke-then-await) is what keeps simple workflows simple. Reserve the handle forms for when the developer actually wants concurrency.
+- **Don't invent four names if the language gives you composition for free.** Rust folds invoke/collect into `.await` vs `.spawn()` because the async ecosystem already has a handle type; forcing `rfi`/`rfc` names onto it would fight the grain. In a generator language with no such handle convention, the explicit names earn their keep.
+
+Get this layer right and the whole engine underneath — promises, tasks, replay, suspend/resume — stays invisible to the developer, which was the point from the start.
+
+Next: [time, retries, and policies](/time-retries-policies) — durable sleep, scheduling without a live process, and how (and where) a retry policy rides along with a call.

@@ -1,0 +1,95 @@
+---
+title: "Tasks and the worker loop"
+description: "How a worker claims work, holds a lease, heartbeats, and returns results — the version-based concurrency and the loop at the center of every SDK."
+hideTitle: true
+---
+
+# Tasks and the worker loop
+
+A promise is a value waiting to exist. A [task](https://docs.resonatehq.io/spec/system-model/tasks) is the responsibility for producing it — and this chapter builds the engine that takes on that responsibility: the worker loop. It is the most important loop in the SDK, because it is where durability stops being a data model and becomes a running system that survives crashes.
+
+The hard requirement the loop has to meet, stated once: a function can outlive the process that started it, and yet *no two processes may ever drive the same execution at the same time*. Those two facts are in tension — to be durable, work must be re-claimable by a new process; to be correct, it must never be doubly-claimed. The protocol resolves the tension with two mechanisms, and most of this chapter is learning to respect them: the **version** and the **lease**.
+
+## What a task is, and when one exists
+
+A task and its promise share an id and are created together, but they are different objects with different jobs: the promise owns the value, the task owns the claim on producing it. Critically, **a task exists only when work must be delivered to a worker** — that is, when the promise carries a `resonate:target` tag. Create a promise without a target and there is no task; nobody is dispatched. Create one with a target and the server creates a task in `pending` and enqueues an execute message to the address.
+
+A task moves through a small lifecycle — `pending` (claimable), `acquired` (a worker is on it), `suspended` (the worker is waiting on other promises), and the terminal `fulfilled`. (There is also `halted`, an administrative state a task enters via `task.halt` and leaves via `task.continue`, which returns it to `pending`, claimable again — so it is *not* terminal, and not part of the normal loop.) Your loop drives the ordinary transitions.
+
+## Claiming a task
+
+When an execute message arrives over the transport (chapter 3), the worker claims the task with `task.acquire`, presenting the task's **version**:
+
+```ts
+// resonate-sdk-ts/src/core.ts — Core.onMessage
+{
+  kind: "task.acquire",
+  head: { corrId, version },
+  data: { id: task.id, version: task.version, pid, ttl },
+}
+```
+
+Rust's `Core::on_message` (`resonate-sdk-rs/resonate/src/core.rs`) does the same: it receives `(task_id, version)` from the transport and calls `Sender::task_acquire` with the id, version, the worker's process id, and a TTL. A successful acquire transitions the task `pending → acquired` and hands back the root promise (and any preloaded promises — chapter 8). Now you hold the claim, and the clock on your lease starts.
+
+There is a second way a task is born already-claimed: when *this* worker is the one invoking, `task.create` creates the task directly in `acquired`, skipping the round-trip — you created the work, so you already hold it. (Its action must still carry a `resonate:target` tag, like any dispatched promise; the server rejects a `task.create` without one.) Both paths converge on the same next step: run the function until it blocks or finishes.
+
+## The version: optimistic concurrency
+
+The version is an optimistic-concurrency-control token, and it is the entire answer to "how do we let a crashed worker's task be re-claimed without two workers fighting over it."
+
+Every mutating task operation must present the version the worker believes is current. The rule the server enforces:
+
+- The version **advances on each fresh `task.acquire`** — a re-claim always hands back a higher version than the previous holder saw. It does *not* change while the task simply sits in `pending` waiting to be re-offered; the increment lands on the *next* acquire, not the moment the task returns to `pending`. (The spec diagram reads as though the bump happens the instant a lease lapses; the shipped server does it on re-acquire — see [testing against the spec](/testing-against-the-spec).)
+- A mutating operation with a **stale version gets `409` Conflict.** The task has moved on without you.
+
+Walk the crash through it. Worker A acquires a task at version 3 and starts working. A's process freezes (GC pause, network partition, it doesn't matter). A's lease expires; the server returns the task to `pending`, still version 3 and claimable. Worker B acquires it — and *that acquire* advances it to version 4. B runs. Now A unfreezes, finishes, and tries to fulfill at version 3 — and the server answers `409`, because the live version is 4. A's work is rejected. There was never a window where both A and B could commit; the version closed it. This is why a `409` is not an error to retry blindly — it is the system *correctly* telling you that you are no longer the one driving this execution. Handle it by stopping, not by retrying harder.
+
+<Callout type="info" title="The promise/task asymmetry, made concrete">
+A promise carries idempotency keys; a task carries a version. They are different on purpose. Idempotency keys make a repeated write *converge* — settle the same promise twice, fine, same value. A version makes a repeated claim *fail* — only one version is live at a time. Promises protect against duplicate **state**; tasks protect against duplicate **progress**. Retrying a task operation with the same version is not idempotent: it works once, then the next operation bumps the version and your old one is dead.
+</Callout>
+
+## The lease and the heartbeat
+
+The version protects correctness; the **lease** is what makes recovery *happen*. An acquired task carries a lease — a deadline by which the worker must prove it is still alive. Miss the deadline and the server returns the task to `pending`, free for another worker to acquire — and that next acquire advances the version, leaving your stale claim behind. Prove liveness and you keep the claim.
+
+Liveness is proven by **heartbeat**, and the single most important fact about it is that **heartbeat is per-process, not per-task**. A worker holding forty tasks does not send forty heartbeats; it sends one, and the server refreshes the lease on every task that process holds. Both SDKs that manage leases this way run a single timer: TypeScript's `AsyncHeartbeat` (`resonate-sdk-ts/src/heartbeat.ts`) fires one `task.heartbeat` on an interval; Rust's `AsyncHeartbeat` (`resonate-sdk-rs/resonate/src/heartbeat.rs`) does the same, tracking the set of active `(id, version)` pairs and sending them together.
+
+Cadence is a tradeoff your SDK picks: heartbeat too rarely and a transient network blip costs you the lease; too often and you flood the server. The reference convention is to heartbeat at **half the lease interval** — enough slack to absorb one missed beat. The actual numbers diverge across the SDKs today, which is worth knowing:
+
+| SDK | Default lease (TTL) | Heartbeat cadence |
+|---|---|---|
+| TypeScript | 60 s | ~30 s (TTL/2) |
+| Rust | 60 s | ~30 s (TTL/2) |
+| Python | 10 s | ~5 s (TTL/2) |
+
+<Callout type="info" title="Pick a lease longer than your longest atomic step">
+The lease is not a request timeout — it is "how long the server waits for a sign of life before assuming you died." Set it comfortably longer than the longest stretch of work your SDK does *between* heartbeats. The default TTL is itself an open spec question (the SDKs disagree, 60 s vs 10 s); whatever you choose, make sure a single durable step can't routinely outrun a heartbeat, or healthy work will get its lease pulled out from under it.
+</Callout>
+
+## Fencing a side effect
+
+The version makes *committing to the server* safe — a stale worker can't fulfill. But what about effects the server can't see? If your function charges a credit card and then crashes before recording it, a re-claiming worker will charge it again. The protocol's answer for "I am about to do something the server can't undo, and I need to be certain I'm the unique current claimant" is **`task.fence`**: a conditional operation that succeeds only if the task is still acquired at the presented version. Fence before you externalize an irreversible effect, and a worker that has silently lost its lease finds out *before* it acts, not after. It is the version check applied to the dangerous moment. (The idempotency that makes most steps safe to replay is chapter 7; fence is the tool for the steps that can't be made idempotent.)
+
+## The loop, end to end
+
+Put it together and the worker loop is:
+
+1. **Receive** an execute message (chapter 3).
+2. **Acquire** the task with `task.acquire`, presenting the version; start the heartbeat if it isn't already running.
+3. **Run** the developer's function. Each durable step creates a promise and waits for the server's reply.
+4. **If the function blocks** on something not yet ready, tell the server `task.suspend` and stop driving it — don't hold a thread spinning. The server parks the task and will send a resume when the awaited promise settles (chapter 8).
+5. **If the function returns,** settle its promise and complete the task in one atomic `task.fulfill`. Both envelope SDKs send a single `task.fulfill` carrying an embedded `promise.settle` action (`resonate-sdk-ts/src/core.ts`, `resonate-sdk-rs/resonate/src/core.rs`) — one operation, so there is no window where the promise is settled but the task isn't.
+6. **If anything goes wrong** before completion, `task.release` (or just let the lease lapse) so another worker can take over. TypeScript releases explicitly on an execution error (`Core.releaseTask`); Rust does the same in its error path. Releasing with your version lets the server reject a release that's already stale.
+
+## Structuring the loop for your runtime
+
+Step 4 is where your language's concurrency model decides the shape of everything. The loop must never block a thread waiting on a durable promise — those waits can be *days* long. So the loop's spine is: drive a function until it yields a dependency, hand that dependency to the server, and free the executor to do other work until a resume comes back.
+
+How you "drive until it yields" is the host language's call, and the reference SDKs split two ways here — a split you'll meet head-on in chapters 7 through 9:
+
+- **TypeScript and Python drive a generator.** The developer's function is a generator that `yield`s a description of each dependency; the SDK steps it with `.next()` / `.send()`, gets the next dependency, and parks. Re-entry resumes the same generator.
+- **Rust drives a future.** The developer's function is an `async fn`; the SDK `.await`s it, and a dependency that isn't ready surfaces as a signal the SDK collects, suspends on, and re-runs from on resume.
+
+Neither is more correct; each is how durable suspension naturally expresses itself in that language's runtime. What's invariant across both is the contract with the server — acquire with a version, heartbeat to hold the lease, suspend rather than block, fulfill atomically, release on failure. Build *that* faithfully, and the loop is durable no matter which runtime shape you chose.
+
+Next: [the function registry and invocation surface](/function-registry) — how the developer's functions get names the server can dispatch to, and how an invocation becomes a targeted promise.
