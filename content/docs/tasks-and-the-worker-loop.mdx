@@ -14,7 +14,7 @@ The hard requirement the loop has to meet, stated once: a function can outlive t
 
 A task and its promise share an id and are created together, but they are different objects with different jobs: the promise owns the value, the task owns the claim on producing it. Critically, **a task exists only when work must be delivered to a worker** — that is, when the promise carries a `resonate:target` tag. Create a promise without a target and there is no task; nobody is dispatched. Create one with a target and the server creates a task in `pending` and enqueues an execute message to the address.
 
-A task moves through a small lifecycle — `pending` (claimable), `acquired` (a worker is on it), `suspended` (the worker is waiting on other promises), and the terminal `fulfilled`. (There is also `halted`, an administrative state a task enters via `task.halt` and leaves via `task.continue`, which returns it to `pending` with a bumped version — so it is *not* terminal, and not part of the normal loop.) Your loop drives the ordinary transitions.
+A task moves through a small lifecycle — `pending` (claimable), `acquired` (a worker is on it), `suspended` (the worker is waiting on other promises), and the terminal `fulfilled`. (There is also `halted`, an administrative state a task enters via `task.halt` and leaves via `task.continue`, which returns it to `pending`, claimable again — so it is *not* terminal, and not part of the normal loop.) Your loop drives the ordinary transitions.
 
 ## Claiming a task
 
@@ -39,10 +39,10 @@ The version is an optimistic-concurrency-control token, and it is the entire ans
 
 Every mutating task operation must present the version the worker believes is current. The rule the server enforces:
 
-- The version **increments on every transition back to `pending`** — a release, a resume, a lease expiry. It does *not* change on `pending → acquired`.
+- The version **advances on each fresh `task.acquire`** — a re-claim always hands back a higher version than the previous holder saw. It does *not* change while the task simply sits in `pending` waiting to be re-offered; the increment lands on the *next* acquire, not the moment the task returns to `pending`. (The spec diagram reads as though the bump happens the instant a lease lapses; the shipped server does it on re-acquire — see [testing against the spec](/testing-against-the-spec).)
 - A mutating operation with a **stale version gets `409` Conflict.** The task has moved on without you.
 
-Walk the crash through it. Worker A acquires a task at version 3 and starts working. A's process freezes (GC pause, network partition, it doesn't matter). A's lease expires; the server releases the task back to `pending` and bumps it to version 4. Worker B acquires at version 4 and runs. Now A unfreezes, finishes, and tries to fulfill at version 3 — and the server answers `409`, because the live version is 4. A's work is rejected. There was never a window where both A and B could commit; the version closed it. This is why a `409` is not an error to retry blindly — it is the system *correctly* telling you that you are no longer the one driving this execution. Handle it by stopping, not by retrying harder.
+Walk the crash through it. Worker A acquires a task at version 3 and starts working. A's process freezes (GC pause, network partition, it doesn't matter). A's lease expires; the server returns the task to `pending`, still version 3 and claimable. Worker B acquires it — and *that acquire* advances it to version 4. B runs. Now A unfreezes, finishes, and tries to fulfill at version 3 — and the server answers `409`, because the live version is 4. A's work is rejected. There was never a window where both A and B could commit; the version closed it. This is why a `409` is not an error to retry blindly — it is the system *correctly* telling you that you are no longer the one driving this execution. Handle it by stopping, not by retrying harder.
 
 <Callout type="info" title="The promise/task asymmetry, made concrete">
 A promise carries idempotency keys; a task carries a version. They are different on purpose. Idempotency keys make a repeated write *converge* — settle the same promise twice, fine, same value. A version makes a repeated claim *fail* — only one version is live at a time. Promises protect against duplicate **state**; tasks protect against duplicate **progress**. Retrying a task operation with the same version is not idempotent: it works once, then the next operation bumps the version and your old one is dead.
@@ -50,7 +50,7 @@ A promise carries idempotency keys; a task carries a version. They are different
 
 ## The lease and the heartbeat
 
-The version protects correctness; the **lease** is what makes recovery *happen*. An acquired task carries a lease — a deadline by which the worker must prove it is still alive. Miss the deadline and the server releases the task back to `pending` (version bumped), free for another worker. Prove liveness and you keep the claim.
+The version protects correctness; the **lease** is what makes recovery *happen*. An acquired task carries a lease — a deadline by which the worker must prove it is still alive. Miss the deadline and the server returns the task to `pending`, free for another worker to acquire — and that next acquire advances the version, leaving your stale claim behind. Prove liveness and you keep the claim.
 
 Liveness is proven by **heartbeat**, and the single most important fact about it is that **heartbeat is per-process, not per-task**. A worker holding forty tasks does not send forty heartbeats; it sends one, and the server refreshes the lease on every task that process holds. Both SDKs that manage leases this way run a single timer: TypeScript's `AsyncHeartbeat` (`resonate-sdk-ts/src/heartbeat.ts`) fires one `task.heartbeat` on an interval; Rust's `AsyncHeartbeat` (`resonate-sdk-rs/resonate/src/heartbeat.rs`) does the same, tracking the set of active `(id, version)` pairs and sending them together.
 

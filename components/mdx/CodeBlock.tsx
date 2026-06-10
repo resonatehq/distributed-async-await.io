@@ -60,7 +60,7 @@ export function Pre({ children, title, "data-title": dataTitle, ...props }: PreP
   const langLabel = lang ? (LANGUAGE_LABELS[lang.toLowerCase()] ?? lang.toLowerCase()) : null;
 
   return (
-    <div className="group relative not-first:mt-4 last:mb-0">
+    <div className="group relative [&:not(:first-child)]:mt-4 last:mb-0">
       <div className="flex items-center justify-between gap-3 px-4 py-2 text-xs font-mono border border-b-0 border-bright-gray-200 dark:border-primary/10 bg-bright-gray-100 dark:bg-surface-subtle">
         <div className="flex items-center gap-2 min-w-0">
           {displayTitle ? (

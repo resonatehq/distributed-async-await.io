@@ -23,7 +23,7 @@ The protocol's [task model](/tasks-and-the-worker-loop) names a set of invariant
 The way to use these is to drive your SDK through a sequence of operations, snapshot the server state after *each* one, and assert all seven hold on every snapshot. A violation pins the bug to the operation that produced it. This is exactly how the reference conformance tooling works — it replays operation sequences and checks an invariant set after every step — and it's the shape your own conformance suite should take.
 
 <Callout type="caution" title="The invariant names read backwards — assert the description, not the name">
-Several of these invariants carry names that state the *opposite* of the rule (a "no-timeout" name guarding "must have a timeout," and vice versa). If you write your assertions from the names alone you will get them inverted and your tests will pass on broken behavior. Assert the *described* condition. This is a small thing that has bitten reviewers, which is the whole reason it's worth a callout.
+Several of these invariants carry *formal identifier names in the spec source* that state the *opposite* of the rule — a `no-timeout`-style name guarding "must have a timeout," and vice versa. (The plain descriptions above are right-way-round; it's the spec's symbol names that invert.) If you write your assertions from the names alone you will get them inverted and your tests will pass on broken behavior. Assert the *described* condition. This is a small thing that has bitten reviewers, which is the whole reason it's worth a callout.
 </Callout>
 
 ## Verify against the shipped server, not the prose
@@ -42,7 +42,7 @@ Conformance, concretely, is a corpus of operation sequences — `promise.create`
 - **Generated sequences** — a fuzzer that emits random-but-valid operation streams against a seed and checks the invariants on every snapshot. This is the closest thing to property-based testing the protocol invites: *for all valid operation sequences, the invariants hold.* It catches the interleavings you wouldn't think to write by hand.
 
 <Callout type="info" title="A conformance suite is a goal, not yet a shared artifact">
-A reusable, cross-SDK conformance corpus — the same recorded scenarios every implementation runs — is the natural endpoint of this chapter, and prototype tooling for it exists internally. Treat the *idea* as the target to build toward; don't assume a public, drop-in suite you can point your CI at today. Until one is published, your conformance corpus is something you grow alongside your SDK, anchored on the invariants above and the shipped server as oracle.
+A reusable, cross-SDK conformance corpus — the same recorded scenarios every implementation runs — is the natural endpoint of this chapter. Treat the *idea* as the target to build toward; don't assume a public, drop-in suite you can point your CI at today. Until one is published, your conformance corpus is something you grow alongside your SDK, anchored on the invariants above and the shipped server as oracle.
 </Callout>
 
 ## Injecting the faults the model is supposed to survive
