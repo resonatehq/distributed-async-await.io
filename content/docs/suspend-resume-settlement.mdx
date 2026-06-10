@@ -8,7 +8,7 @@ hideTitle: true
 
 A durable function spends most of its life *not running*. It starts, does a little work, and then awaits something — a remote call, a timer, a sibling execution — that won't be ready for milliseconds or months. This chapter is about that boundary: how a function stops without blocking anything, and how the value it was waiting for finds its way back in and starts it running again.
 
-The thing to hold onto: when a durable function awaits an unsettled promise, the worker does **not** sit on a thread waiting. It tells the server "I'm waiting on this," lets go of the execution entirely, and goes and does other work. The server remembers, and pushes the function back to a worker when the awaited promise settles. The wait costs nothing while it lasts — which is what makes a week-long sleep or a paused human-approval step as cheap as a fast one.
+The thing to hold onto: when a durable function awaits an unsettled promise, the worker does **not** sit on a thread waiting. It tells the server "I'm waiting on this," lets go of the execution entirely, and goes and does other work. The server remembers, and pushes the function back to a worker when the awaited promise settles. The wait costs nothing while it lasts — which is what makes a week-long sleep or a paused human-approval step as inexpensive as a fast one.
 
 ## Suspending: handing the wait to the server
 
