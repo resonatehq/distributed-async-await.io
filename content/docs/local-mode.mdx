@@ -22,7 +22,7 @@ A real server has a wall clock advancing on its own. An in-process one doesn't �
 
 ## What it emulates, and what it cannot
 
-Local mode is faithful to the parts of the contract that are *logic*: the full promise lifecycle (create, settle, idempotent re-create, timeout), the task state machine (pending → acquired → suspended → fulfilled), lease tracking, the [settlement chain](/suspend-resume-settlement) that resumes a suspended task when its awaited promise settles, and the preload that makes resumption cheap. A developer can write a workflow, kill the process mid-flight, restart, and watch it replay — the whole point — entirely in local mode.
+Local mode is faithful to the parts of the contract that are *logic*: the full promise lifecycle (create, settle, idempotent re-create, timeout), the task state machine (pending → acquired → suspended → fulfilled), lease tracking, the [settlement chain](/suspend-resume-settlement) that resumes a suspended task when its awaited promise settles, and the preload that makes resumption inexpensive. A developer can write a workflow, kill the process mid-flight, restart, and watch it replay — the whole point — entirely in local mode.
 
 What it *cannot* emulate are the parts that are *distribution*, and being clear-eyed about these keeps you from testing a fiction:
 

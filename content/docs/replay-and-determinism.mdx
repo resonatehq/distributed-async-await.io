@@ -23,7 +23,7 @@ The "has this happened?" question is just `promise.create`. Recall from chapter 
 
 All three reference SDKs implement exactly this. In TypeScript and Python, a `promise.create` that comes back already-settled feeds its stored value into the generator's next `.next()`/`.send()` call (`Coroutine.exec` in `resonate-sdk-ts/src/coroutine.ts`, `Computation` in `resonate-sdk-py/resonate/scheduler.py`). In Rust, the already-settled promise resolves the awaited future immediately from a preload cache (`Effects::create_promise` in `resonate-sdk-rs/resonate/src/effects.rs`). The shape differs; the mechanism is identical — recorded promises stand in for re-execution.
 
-<Callout type="info" title="Preload makes replay cheap">
+<Callout type="info" title="Preload makes replay inexpensive">
 A naive replay would round-trip to the server for every already-settled step — slow, for a function with a long history. The protocol avoids it with **preload**: when a worker acquires or resumes a task, the server hands back the already-settled promises in this execution's branch, and the SDK serves the replay from that cache instead of re-fetching. The envelope SDKs receive a `preload` array on acquire; you'll see it again in chapter 8, where it's what makes resumption fast.
 </Callout>
 
@@ -57,7 +57,7 @@ Rust takes a narrower stance — it does not ship `ctx.now()` or `ctx.random()` 
 
 It's worth making explicit, because it surprises people: a *local* step — a function that runs in-process, no remote dispatch — is still backed by a durable promise. `ctx.run` in all three SDKs creates a promise tagged `resonate:scope: "local"`, executes the function, and settles the promise with its result (`resonate-sdk-ts/src/context.ts`, `resonate-sdk-py/resonate/scheduler.py`, `resonate-sdk-rs/resonate/src/context.rs`). The locality is about *where it runs*, not *whether it's recorded*. This is what lets replay skip a local computation just as cleanly as a remote one — the recorded promise is authoritative either way.
 
-The flip side, which your SDK should make legible: a step that is *not* durable (an SDK may allow opting out for cheap, side-effect-free work) is not replay-safe. It re-runs on every replay. That's a fine, deliberate optimization for a pure helper, and a quiet bug if a developer reaches for it around a side effect. Make the durable path the default and the non-durable path the conscious choice.
+The flip side, which your SDK should make legible: a step that is *not* durable (an SDK may allow opting out for inexpensive, side-effect-free work) is not replay-safe. It re-runs on every replay. That's a fine, deliberate optimization for a pure helper, and a quiet bug if a developer reaches for it around a side effect. Make the durable path the default and the non-durable path the conscious choice.
 
 ## A note on detection
 

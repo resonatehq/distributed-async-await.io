@@ -38,7 +38,7 @@ A durable SDK's performance is dominated by how it talks to the server, and ther
 
 **Connection reuse — make sure you have it.** Rust holds a single pooled `reqwest` client and reuses connections across calls; TypeScript rides the platform's pooled `fetch` and holds a persistent server-sent-events stream for inbound messages with bounded reconnect backoff. Python opens a session per call, so it reuses a connection only within a single retry loop, not across operations. Per-call connection setup is pure overhead on a hot path; pool and keep-alive by default.
 
-**Lease cadence — the one knob with a real tradeoff.** Heartbeat at half the lease TTL is the convention across all three SDKs (`ttl / 2`), and the tradeoff is direct: a shorter TTL recovers a dead worker's tasks faster but heartbeats more often, putting more load on the server; a longer TTL is cheaper but leaves a crashed worker's work stranded for longer. Pick the TTL for your workload's longest atomic step (so a healthy step never outruns its lease), and let the heartbeat follow at half of it.
+**Lease cadence — the one knob with a real tradeoff.** Heartbeat at half the lease TTL is the convention across all three SDKs (`ttl / 2`), and the tradeoff is direct: a shorter TTL recovers a dead worker's tasks faster but heartbeats more often, putting more load on the server; a longer TTL is lighter on the server but leaves a crashed worker's work stranded for longer. Pick the TTL for your workload's longest atomic step (so a healthy step never outruns its lease), and let the heartbeat follow at half of it.
 
 ## The failure modes that reach an operator
 
