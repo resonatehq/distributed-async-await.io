@@ -147,8 +147,8 @@ export function CodeTabs({ children, labels, defaultValue, values, groupId }: Co
   );
 
   return (
-    <div className="my-4 border border-primary/10">
-      <div className="flex border-b border-primary/10 bg-bright-gray-50 dark:bg-surface-elevated" role="tablist">
+    <div className="my-4 border border-bright-gray-200 dark:border-primary/10">
+      <div className="flex border-b border-bright-gray-200 dark:border-primary/10 bg-bright-gray-50 dark:bg-surface-elevated" role="tablist">
         {tabKeys.map((key, i) => (
           <button
             key={key}
@@ -157,8 +157,8 @@ export function CodeTabs({ children, labels, defaultValue, values, groupId }: Co
             onClick={() => selectTab(key)}
             className={`px-4 py-2 text-sm font-mono transition-colors focus-visible:outline-2 focus-visible:outline-secondary focus-visible:outline-offset-[-2px] ${
               activeKey === key
-                ? "text-secondary border-b-2 border-secondary -mb-px"
-                : "text-muted hover:text-bright-gray-900 dark:hover:text-primary"
+                ? "text-bright-gray-900 dark:text-secondary border-b-2 border-secondary -mb-px"
+                : "text-bright-gray-500 hover:text-bright-gray-900 dark:text-muted dark:hover:text-primary"
             }`}
           >
             {tabLabels[i]}
