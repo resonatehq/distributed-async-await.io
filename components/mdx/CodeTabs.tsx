@@ -164,6 +164,12 @@ export function CodeTabs({ children, labels, defaultValue, values, groupId }: Co
   const nested = depth > 0;
   const baseId = useId();
 
+  // Outer tabs wrap content in a bordered box, so the panel needs padding to
+  // keep code blocks and trailing links off that border; the inset also lines
+  // the content up with where the tab labels start. Nested tabs have no box
+  // (just a left rail), so they don't get the extra padding.
+  const panelPad = nested ? "" : "p-4";
+
   const panels = (
     <TabsDepthContext.Provider value={depth + 1}>
       {items.map((child, i) => {
@@ -174,7 +180,7 @@ export function CodeTabs({ children, labels, defaultValue, values, groupId }: Co
             role="tabpanel"
             id={`${baseId}-panel-${key}`}
             aria-labelledby={`${baseId}-tab-${key}`}
-            className={activeKey === key ? "block" : "hidden"}
+            className={`${activeKey === key ? "block" : "hidden"} ${panelPad}`}
           >
             {child}
           </div>
