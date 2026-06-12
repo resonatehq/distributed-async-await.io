@@ -5,6 +5,7 @@ import {
   useEffect,
   useCallback,
   useContext,
+  useId,
   createContext,
   type ReactNode,
   type ReactElement,
@@ -161,13 +162,20 @@ export function CodeTabs({ children, labels, defaultValue, values, groupId }: Co
 
   const depth = useContext(TabsDepthContext);
   const nested = depth > 0;
+  const baseId = useId();
 
   const panels = (
     <TabsDepthContext.Provider value={depth + 1}>
       {items.map((child, i) => {
         const key = tabKeys[i];
         return (
-          <div key={key} role="tabpanel" className={activeKey === key ? "block" : "hidden"}>
+          <div
+            key={key}
+            role="tabpanel"
+            id={`${baseId}-panel-${key}`}
+            aria-labelledby={`${baseId}-tab-${key}`}
+            className={activeKey === key ? "block" : "hidden"}
+          >
             {child}
           </div>
         );
@@ -182,18 +190,20 @@ export function CodeTabs({ children, labels, defaultValue, values, groupId }: Co
     return (
       <div className="my-3 border-l-2 border-bright-gray-200 pl-4 dark:border-primary/10">
         <div
-          className="mb-2.5 inline-flex items-center gap-0.5 rounded-lg bg-bright-gray-100 p-0.5 dark:bg-surface-subtle"
+          className="mb-2.5 inline-flex items-center gap-0.5 rounded-lg bg-bright-gray-100 p-0.5 dark:bg-surface-elevated"
           role="tablist"
         >
           {tabKeys.map((key, i) => (
             <button
               key={key}
               role="tab"
+              id={`${baseId}-tab-${key}`}
+              aria-controls={`${baseId}-panel-${key}`}
               aria-selected={activeKey === key}
               onClick={() => selectTab(key)}
-              className={`inline-flex items-center rounded-md px-3 py-1.5 text-xs leading-none font-mono transition-colors focus-visible:outline-2 focus-visible:outline-secondary focus-visible:outline-offset-1 ${
+              className={`inline-flex items-center rounded-md px-3 py-1.5 text-xs leading-tight font-mono transition-colors focus-visible:outline-2 focus-visible:outline-secondary focus-visible:outline-offset-1 ${
                 activeKey === key
-                  ? "bg-white text-bright-gray-900 shadow-sm dark:bg-surface-elevated dark:text-secondary"
+                  ? "bg-white text-bright-gray-900 shadow-sm dark:bg-surface-subtle dark:text-primary"
                   : "text-bright-gray-500 hover:text-bright-gray-900 dark:text-muted dark:hover:text-primary"
               }`}
             >
@@ -214,9 +224,11 @@ export function CodeTabs({ children, labels, defaultValue, values, groupId }: Co
           <button
             key={key}
             role="tab"
+            id={`${baseId}-tab-${key}`}
+            aria-controls={`${baseId}-panel-${key}`}
             aria-selected={activeKey === key}
             onClick={() => selectTab(key)}
-            className={`inline-flex items-center px-4 py-2.5 text-sm leading-none font-mono transition-colors focus-visible:outline-2 focus-visible:outline-secondary focus-visible:outline-offset-[-2px] ${
+            className={`inline-flex items-center px-4 py-2.5 text-sm leading-tight font-mono transition-colors focus-visible:outline-2 focus-visible:outline-secondary focus-visible:outline-offset-[-2px] ${
               activeKey === key
                 ? "text-bright-gray-900 dark:text-secondary border-b-2 border-secondary -mb-px"
                 : "text-bright-gray-500 hover:text-bright-gray-900 dark:text-muted dark:hover:text-primary"
