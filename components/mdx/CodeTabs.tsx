@@ -1,6 +1,19 @@
 "use client";
 
-import { useState, useEffect, useCallback, type ReactNode, type ReactElement } from "react";
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useContext,
+  createContext,
+  type ReactNode,
+  type ReactElement,
+} from "react";
+
+// Tracks how deeply a <Tabs> is nested inside other <Tabs>. The outermost set
+// renders as a bordered box with underline tabs; nested sets render as an
+// indented segmented control so the reader can always tell the levels apart.
+const TabsDepthContext = createContext(0);
 
 interface TabValue {
   label: string;
@@ -146,6 +159,54 @@ export function CodeTabs({ children, labels, defaultValue, values, groupId }: Co
     [groupId]
   );
 
+  const depth = useContext(TabsDepthContext);
+  const nested = depth > 0;
+
+  const panels = (
+    <TabsDepthContext.Provider value={depth + 1}>
+      {items.map((child, i) => {
+        const key = tabKeys[i];
+        return (
+          <div key={key} role="tabpanel" className={activeKey === key ? "block" : "hidden"}>
+            {child}
+          </div>
+        );
+      })}
+    </TabsDepthContext.Provider>
+  );
+
+  // Nested tabs: an indented segmented control. The left rail signals the
+  // nesting level visually, and the pill control reads as subordinate to the
+  // outer underline tabs without re-drawing a full bordered box inside one.
+  if (nested) {
+    return (
+      <div className="my-3 border-l-2 border-bright-gray-200 pl-4 dark:border-primary/10">
+        <div
+          className="mb-2.5 inline-flex items-center gap-0.5 rounded-lg bg-bright-gray-100 p-0.5 dark:bg-surface-subtle"
+          role="tablist"
+        >
+          {tabKeys.map((key, i) => (
+            <button
+              key={key}
+              role="tab"
+              aria-selected={activeKey === key}
+              onClick={() => selectTab(key)}
+              className={`inline-flex items-center rounded-md px-3 py-1.5 text-xs leading-none font-mono transition-colors focus-visible:outline-2 focus-visible:outline-secondary focus-visible:outline-offset-1 ${
+                activeKey === key
+                  ? "bg-white text-bright-gray-900 shadow-sm dark:bg-surface-elevated dark:text-secondary"
+                  : "text-bright-gray-500 hover:text-bright-gray-900 dark:text-muted dark:hover:text-primary"
+              }`}
+            >
+              {tabLabels[i]}
+            </button>
+          ))}
+        </div>
+        <div>{panels}</div>
+      </div>
+    );
+  }
+
+  // Outer tabs: bordered box with underline tabs.
   return (
     <div className="my-4 border border-bright-gray-200 dark:border-primary/10">
       <div className="flex border-b border-bright-gray-200 dark:border-primary/10 bg-bright-gray-50 dark:bg-surface-elevated" role="tablist">
@@ -155,7 +216,7 @@ export function CodeTabs({ children, labels, defaultValue, values, groupId }: Co
             role="tab"
             aria-selected={activeKey === key}
             onClick={() => selectTab(key)}
-            className={`px-4 py-2 text-sm font-mono transition-colors focus-visible:outline-2 focus-visible:outline-secondary focus-visible:outline-offset-[-2px] ${
+            className={`inline-flex items-center px-4 py-2.5 text-sm leading-none font-mono transition-colors focus-visible:outline-2 focus-visible:outline-secondary focus-visible:outline-offset-[-2px] ${
               activeKey === key
                 ? "text-bright-gray-900 dark:text-secondary border-b-2 border-secondary -mb-px"
                 : "text-bright-gray-500 hover:text-bright-gray-900 dark:text-muted dark:hover:text-primary"
@@ -165,16 +226,7 @@ export function CodeTabs({ children, labels, defaultValue, values, groupId }: Co
           </button>
         ))}
       </div>
-      <div>
-        {items.map((child, i) => {
-          const key = tabKeys[i];
-          return (
-            <div key={key} role="tabpanel" className={activeKey === key ? "block" : "hidden"}>
-              {child}
-            </div>
-          );
-        })}
-      </div>
+      <div>{panels}</div>
     </div>
   );
 }
