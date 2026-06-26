@@ -38,7 +38,12 @@ export const metadata: Metadata = {
   description:
     "How to build a Resonate SDK. A handbook for developers implementing the Distributed Async Await protocol in any language — from the protocol mental model to production concerns.",
   icons: {
-    icon: "/images/favicon.png",
+    icon: [
+      { url: "/images/favicon.svg", type: "image/svg+xml" },
+      { url: "/images/favicon.png", type: "image/png", sizes: "256x256" },
+    ],
+    shortcut: "/favicon.ico",
+    apple: "/images/apple-touch-icon.png",
   },
   openGraph: {
     title: "Distributed Async Await — the SDK author's handbook",
