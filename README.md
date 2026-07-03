@@ -3,11 +3,14 @@
 The **SDK author's handbook** for [Resonate](https://www.resonatehq.io) — how to build a Resonate SDK
 that implements the Distributed Async Await protocol in any language.
 
-This site is the implementer-facing companion to the two other Resonate documentation surfaces:
+This site is the implementer-facing companion to the other Resonate documentation surfaces:
 
 - **[docs.resonatehq.io](https://docs.resonatehq.io)** — how to *use* Resonate (adopter docs + SDK guides).
-- **[docs.resonatehq.io/spec](https://docs.resonatehq.io/spec)** — the formal Distributed Async Await
-  specification (the protocol, definitions, and models).
+- **[github.com/resonatehq/resonate-specification](https://github.com/resonatehq/resonate-specification)** — the normative
+  executable protocol specification: the Resonate protocol as an abstract machine in Lean 4, the
+  machine-checkable ground truth for handler and state-transition semantics.
+- **[docs.resonatehq.io/spec](https://docs.resonatehq.io/spec)** — the Distributed Async Await prose specification
+  (protocol definitions, models, and the durable-promise contract).
 - **distributed-async-await.io** (this repo) — how to *build* an SDK against that spec.
 
 The seam: the spec tells you what wire bytes to produce; this handbook teaches you how to turn those

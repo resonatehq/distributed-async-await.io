@@ -56,7 +56,7 @@ This is worth stating carefully, because the imprecise version — "at-most-once
 
 ## Preload: resuming without re-fetching
 
-One efficiency closes the loop with chapter 7. When a worker re-acquires a task to resume it, the steps the function already completed are settled promises it's about to replay over. Rather than make the worker round-trip for each, the server hands them back on acquire as **preload** — the settled promises in this execution's branch, returned alongside the task. The SDK loads them into a cache and serves the replay from there (`buildEffects` in `resonate-sdk-ts/src/util.ts`, `Effects::new` in `resonate-sdk-rs/resonate/src/effects.rs`; Python passes the settled leaf promise directly into its resume command). And the `300` fast path carries a preload too, so a continue-without-suspending picks up the same way. Preload is what keeps resumption from getting slower as an execution's history grows.
+One efficiency closes the loop with chapter 7. The `preload` field appears on four response types in the Lean spec — `TaskAcquireRes`, `TaskCreateRes`, `TaskFenceRes`, and `TaskSuspendRes` — declared as `preload : List PromiseRecord := []`. No handler in the formal spec ever populates it with a non-empty value; the spec is silent on how or when a server should fill preload. What the reference SDKs do is an implementation strategy the server may apply: when a worker re-acquires a task to resume it, the server *can* return the settled promises from this execution's branch alongside the task, and the SDK loads them into a replay cache (`buildEffects` in `resonate-sdk-ts/src/util.ts`, `Effects::new` in `resonate-sdk-rs/resonate/src/effects.rs`; Python passes the settled leaf promise directly into its resume command). The `300` fast path carries a preload field too, used the same way. This optimization — when the server chooses to populate it — keeps resumption from getting slower as an execution's history grows; but because the Lean spec leaves the population semantics unspecified, your SDK should function correctly whether preload is empty or not, fetching settled promises on demand as the fallback.
 
 ## The shape of it
 
@@ -65,7 +65,7 @@ Step back and the whole chapter is one loop, drawn around the wait:
 - A function awaits an unsettled promise → the worker `task.suspend`s (atomically, over all awaited promises) and lets go.
 - Unless the promise was already settled → `300`, and the worker just continues.
 - The promise settles → the server fires the callback exactly once, parks-to-pending, and dispatches a resume.
-- A worker re-acquires, replays over the preloaded history, and the function continues from exactly where it waited.
+- A worker re-acquires, replays over the preloaded history (if the server populates it; otherwise fetches on demand), and the function continues from exactly where it waited.
 
 That loop, plus the determinism of chapter 7, is the complete durable-execution engine. A function can suspend a thousand times across a thousand process lifetimes, and each resumption lands it back exactly where it was, with exactly the values it had. Everything from here — retries, codecs, local mode, conformance testing, production concerns — is refinement on top of an engine that, at this point, already works.
 
