@@ -8,6 +8,8 @@ hideTitle: true
 
 The previous chapter made one promise: the developer writes a function, and your SDK makes it survive a crash. This chapter names the machinery that delivers on that — the four moving parts you will be implementing and the loop that ties them together. Nothing here is the full story; every piece gets its own chapter later. The goal is only that when we start writing client code, the words already mean something.
 
+The executable definition of every handler this chapter summarizes lives in [github.com/resonatehq/resonate-specification](https://github.com/resonatehq/resonate-specification) — the Resonate protocol as an abstract machine in Lean 4. When you need to verify what the server does in an edge case, that is the ground truth.
+
 There are four parts: **promises**, **tasks**, **messages**, and the **worker loop**. Hold them loosely for now.
 
 ## The server is a message bus, not a database
