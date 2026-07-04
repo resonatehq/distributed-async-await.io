@@ -209,7 +209,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 
   const title = page.data.title;
   const description =
-    page.data.description || `${title} — the Distributed Async Await SDK author's handbook`;
+    page.data.description || `${title} — Distributed Async Await`;
 
   return {
     title,

@@ -53,7 +53,7 @@ const index = files.map((f) => {
 
 writeFileSync(
   join(PUBLIC_DIR, "llms.txt"),
-  `# Distributed Async Await — specification, server implementers' guide, and SDK authors' handbook\n\n> How to build a Resonate SDK in any language, from the protocol mental model to production concerns.\n\n${index.join("\n")}\n`
+  `# Distributed Async Await — specification, server implementers' guide, and SDK authors' handbook\n\n> The protocol specification, server implementers' guide, and SDK authors' handbook for Distributed Async Await.\n\n${index.join("\n")}\n`
 );
 
 // llms-full.txt — full content concatenated
