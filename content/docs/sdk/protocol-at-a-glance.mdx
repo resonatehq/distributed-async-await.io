@@ -22,7 +22,7 @@ So the mental model is not "client calls server." It is "two parties exchange me
 
 ## Promises: the unit of truth
 
-A [durable promise](/spec/programming-model/durable-promise-specification) is a record of a future value that lives in the server's storage rather than in a process's memory. It is `pending` until someone settles it, and then it is settled forever — `resolved` with a value, or `rejected` with an error.
+A [durable promise](https://docs.resonatehq.io/spec/programming-model/durable-promise-specification) is a record of a future value that lives in the server's storage rather than in a process's memory. It is `pending` until someone settles it, and then it is settled forever — `resolved` with a value, or `rejected` with an error.
 
 That permanence is the whole trick. Because the outcome of a piece of work is written down in a place that outlives any single process, a fresh process can ask "did this already happen?" and get a truthful answer. Every durable step the developer writes becomes a promise; replay (chapter 7) is nothing more than reading those promises back instead of re-running the work.
 
@@ -40,7 +40,7 @@ The last one catches people: a promise that times out is not left pending: it tr
 
 ## Tasks: the claim on a promise
 
-A promise is a value waiting to exist. A [task](/spec/system-model/tasks) is the *responsibility for producing it*. The two share an identifier and are created together, but they are distinct objects with distinct jobs: the promise owns the value, the task owns the claim.
+A promise is a value waiting to exist. A [task](https://docs.resonatehq.io/spec/system-model/tasks) is the *responsibility for producing it*. The two share an identifier and are created together, but they are distinct objects with distinct jobs: the promise owns the value, the task owns the claim.
 
 Tasks exist only when work has to be delivered to a worker — concretely, when a promise carries a `resonate:target` tag naming a delivery address. That tag is the trigger: create a promise with it and the server creates a task and enqueues an execute message to the address. Create a promise without it and you get a bare promise that someone has to resolve by other means.
 
@@ -53,7 +53,7 @@ Versions and leases together are the recovery mechanism — they are how the pro
 
 ## Messages: the wire envelope
 
-Everything the SDK and server say to each other rides a single uniform [envelope](/spec/execution-model/message-passing), the same shape over whatever transport you choose:
+Everything the SDK and server say to each other rides a single uniform [envelope](https://docs.resonatehq.io/spec/execution-model/message-passing), the same shape over whatever transport you choose:
 
 ```text
 {

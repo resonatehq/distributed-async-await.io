@@ -10,7 +10,7 @@ A durable execution SDK has an unusually demanding correctness bar: a bug doesn'
 
 ## The server invariants are your test oracle
 
-The protocol's [task model](/sdk/tasks-and-the-worker-loop) names a set of invariants the server maintains over every task at all times. They are the most useful thing to test against, because they are precise, they are total (they hold after *every* operation, not just at the end), and they translate directly into assertions. The [specification's task model](/spec/system-model/tasks) states seven:
+The protocol's [task model](/sdk/tasks-and-the-worker-loop) names a set of invariants the server maintains over every task at all times. They are the most useful thing to test against, because they are precise, they are total (they hold after *every* operation, not just at the end), and they translate directly into assertions. The [specification's task model](https://docs.resonatehq.io/spec/system-model/tasks) states seven:
 
 1. **Every task has a corresponding promise** — no orphan tasks.
 2. **Every pending task has a retry timeout** — so a task that's claimable but unclaimed will eventually be re-offered.

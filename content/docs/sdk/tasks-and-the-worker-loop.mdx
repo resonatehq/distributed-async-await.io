@@ -6,7 +6,7 @@ hideTitle: true
 
 # Tasks and the worker loop
 
-A promise is a value waiting to exist. A [task](/spec/system-model/tasks) is the responsibility for producing it — and this chapter builds the engine that takes on that responsibility: the worker loop. It is the most important loop in the SDK, because it is where durability stops being a data model and becomes a running system that survives crashes.
+A promise is a value waiting to exist. A [task](https://docs.resonatehq.io/spec/system-model/tasks) is the responsibility for producing it — and this chapter builds the engine that takes on that responsibility: the worker loop. It is the most important loop in the SDK, because it is where durability stops being a data model and becomes a running system that survives crashes.
 
 The hard requirement the loop has to meet, stated once: a function can outlive the process that started it, and yet *no two processes may ever drive the same execution at the same time*. Those two facts are in tension — to be durable, work must be re-claimable by a new process; to be correct, it must never be doubly-claimed. The protocol resolves the tension with two mechanisms, and most of this chapter is learning to respect them: the **version** and the **lease**.
 
