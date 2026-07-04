@@ -36,7 +36,7 @@ It helps to be precise about the boundary, because it is the single most importa
 The spec describes the server's side of this contract precisely: the wire envelope, the promise state machine, the task lifecycle, the invariants. You can read it as the set of bytes the server will accept and the guarantees it makes in return. The SDK is the other half of that contract, written in your language, for your developers.
 
 <Callout type="info" title="The seam this handbook lives on">
-The [specification](https://docs.resonatehq.io/spec) tells you *what bytes to produce and what guarantees hold*. It is language-agnostic by design. This handbook teaches you *how to turn those bytes into a library that feels native* — which is necessarily language-specific, and is the part the spec cannot write for you.
+The [specification](/spec) tells you *what bytes to produce and what guarantees hold*. It is language-agnostic by design. This handbook teaches you *how to turn those bytes into a library that feels native* — which is necessarily language-specific, and is the part the spec cannot write for you.
 </Callout>
 
 ## What "idiomatic" actually demands
@@ -55,6 +55,6 @@ You will meet each of these again, in code, in later chapters. For now the point
 
 ## What comes next
 
-The next chapter, [the protocol at a glance](/protocol-at-a-glance), zooms out to the moving parts you will be implementing — promises, tasks, messages, and the loop that ties them together — so that when we start writing client code in [Talking to the server](/talking-to-the-server), the pieces already have names.
+The next chapter, [the protocol at a glance](/sdk/protocol-at-a-glance), zooms out to the moving parts you will be implementing — promises, tasks, messages, and the loop that ties them together — so that when we start writing client code in [Talking to the server](/sdk/talking-to-the-server), the pieces already have names.
 
 You do not need to memorize the protocol to start. You need to hold one idea: **the developer wrote a function, and your job is to make it survive.** Everything else is detail in service of that.

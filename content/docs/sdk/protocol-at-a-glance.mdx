@@ -22,7 +22,7 @@ So the mental model is not "client calls server." It is "two parties exchange me
 
 ## Promises: the unit of truth
 
-A [durable promise](https://docs.resonatehq.io/spec/programming-model/durable-promise-specification) is a record of a future value that lives in the server's storage rather than in a process's memory. It is `pending` until someone settles it, and then it is settled forever — `resolved` with a value, or `rejected` with an error.
+A [durable promise](/spec/programming-model/durable-promise-specification) is a record of a future value that lives in the server's storage rather than in a process's memory. It is `pending` until someone settles it, and then it is settled forever — `resolved` with a value, or `rejected` with an error.
 
 That permanence is the whole trick. Because the outcome of a piece of work is written down in a place that outlives any single process, a fresh process can ask "did this already happen?" and get a truthful answer. Every durable step the developer writes becomes a promise; replay (chapter 7) is nothing more than reading those promises back instead of re-running the work.
 
@@ -36,11 +36,11 @@ A promise has a small set of terminal states, and your SDK has to handle all of 
 | `rejected_canceled` | Settled by an explicit cancel. |
 | `rejected_timedout` | The promise's timeout elapsed before it settled. |
 
-The last one catches people: a promise that times out is not left pending: it transitions to a terminal `rejected_timedout`, and anything awaiting it resumes with that failure. (A promise tagged `resonate:timer` is the deliberate exception — it resolves on timeout instead, which is how durable sleeps are built.) Promises in code, including the value schema and the idempotency keys that make creation safe to retry, are [chapter 4](/promise-lifecycle).
+The last one catches people: a promise that times out is not left pending: it transitions to a terminal `rejected_timedout`, and anything awaiting it resumes with that failure. (A promise tagged `resonate:timer` is the deliberate exception — it resolves on timeout instead, which is how durable sleeps are built.) Promises in code, including the value schema and the idempotency keys that make creation safe to retry, are [chapter 4](/sdk/promise-lifecycle).
 
 ## Tasks: the claim on a promise
 
-A promise is a value waiting to exist. A [task](https://docs.resonatehq.io/spec/system-model/tasks) is the *responsibility for producing it*. The two share an identifier and are created together, but they are distinct objects with distinct jobs: the promise owns the value, the task owns the claim.
+A promise is a value waiting to exist. A [task](/spec/system-model/tasks) is the *responsibility for producing it*. The two share an identifier and are created together, but they are distinct objects with distinct jobs: the promise owns the value, the task owns the claim.
 
 Tasks exist only when work has to be delivered to a worker — concretely, when a promise carries a `resonate:target` tag naming a delivery address. That tag is the trigger: create a promise with it and the server creates a task and enqueues an execute message to the address. Create a promise without it and you get a bare promise that someone has to resolve by other means.
 
@@ -49,11 +49,11 @@ A task carries two things your SDK must respect:
 - A **version** — an optimistic-concurrency token. Every operation that mutates a task must present the version it expects. If the task has moved on without you, the server answers `409` and you re-fetch and reconsider. This is what makes it safe for a crashed worker's task to be handed to a successor: the original worker, if it comes back, presents a stale version and loses.
 - A **lease** — a deadline by which the worker must prove it is still alive, via heartbeat. Miss the deadline and the server releases the task back to `pending` (bumping the version) so another worker can claim it. Heartbeat is per-process, not per-task: one signal refreshes every task a worker holds.
 
-Versions and leases together are the recovery mechanism — they are how the protocol lets a function outlive the process that started it without ever letting two processes drive it at once. Tasks, the worker loop, and lease management get built in [chapter 5](/tasks-and-the-worker-loop).
+Versions and leases together are the recovery mechanism — they are how the protocol lets a function outlive the process that started it without ever letting two processes drive it at once. Tasks, the worker loop, and lease management get built in [chapter 5](/sdk/tasks-and-the-worker-loop).
 
 ## Messages: the wire envelope
 
-Everything the SDK and server say to each other rides a single uniform [envelope](https://docs.resonatehq.io/spec/execution-model/message-passing), the same shape over whatever transport you choose:
+Everything the SDK and server say to each other rides a single uniform [envelope](/spec/execution-model/message-passing), the same shape over whatever transport you choose:
 
 ```text
 {
@@ -66,7 +66,7 @@ Everything the SDK and server say to each other rides a single uniform [envelope
 The response echoes the `kind` and the `corrId` — so a client multiplexing many in-flight requests over one connection can pair each reply to its request — and carries a `status` in its head. The status codes are a small HTTP-shaped set; two of them are load-bearing in ways worth flagging now:
 
 - **`409` Conflict** — a version mismatch, an invalid state transition, or a failed fence. Not an error to retry blindly; a signal that your view of the world is stale.
-- **`300` Continue** — the fast-path answer to `task.suspend`: the promise you were about to wait on has *already* settled, so don't suspend, just continue. You will meet this in [chapter 8](/suspend-resume-settlement); it is the difference between a snappy SDK and one that takes a network round-trip to notice work is already done.
+- **`300` Continue** — the fast-path answer to `task.suspend`: the promise you were about to wait on has *already* settled, so don't suspend, just continue. You will meet this in [chapter 8](/sdk/suspend-resume-settlement); it is the difference between a snappy SDK and one that takes a network round-trip to notice work is already done.
 
 The two canonical messages flowing *to* your worker are **Invoke** ("start executing this") and **Resume** ("the thing you awaited is ready"). Those are the spec's names for the interaction; on the envelope wire the SDKs carry both as a single message kind, `execute`, and tell a fresh start from a resume by what's *in* it rather than by the kind (chapter 5 builds this). Recognizing and dispatching those messages is the heart of the worker loop.
 
@@ -91,4 +91,4 @@ Every envelope's `head.version` carries the protocol version the request is buil
 
 Five words that the rest of the handbook leans on: **promise** (the durable value), **task** (the claim on it, with its version and lease), **message** (the enveloped request/response), **Invoke / Resume** (the two messages that drive a worker, carried on the wire as `execute`), and **suspend / fulfill** (how a worker yields and completes).
 
-Next: [Talking to the server](/talking-to-the-server) — the connection, the transport, and the first real requests over the wire.
+Next: [Talking to the server](/sdk/talking-to-the-server) — the connection, the transport, and the first real requests over the wire.
