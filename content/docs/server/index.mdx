@@ -41,20 +41,23 @@ invariants the machine specifies after every handler invocation. That is the ent
 Concretely:
 
 - Every handler the spec defines — `promise.get`, `promise.create`, `promise.settle`,
-  `promise.register_callback`, `promise.register_listener`, `task.acquire`, `task.create`,
-  `task.fence`, `task.heartbeat`, `task.suspend`, `task.fulfill`, `task.release`, `task.halt`,
-  `task.continue`, `schedule.get`, `schedule.create`, `schedule.delete`, plus the internal
-  `resume` and `timeouts` transitions — must behave as the corresponding Lean function specifies.
+  `promise.register_callback`, `promise.register_listener`, `task.get`, `task.create`,
+  `task.acquire`, `task.fence`, `task.heartbeat`, `task.suspend`, `task.fulfill`, `task.release`,
+  `task.halt`, `task.continue`, `schedule.get`, `schedule.create`, `schedule.delete`, plus the
+  internal `resume` and `timeouts` transitions — must behave as the corresponding Lean function
+  specifies. (The three `*.search` handlers also have Lean definitions: `501`, deliberately.)
 - State transitions must be atomic with respect to the spec's state model. A handler either
   completes all its effects or none.
 - The invariants the machine holds over promises, tasks, schedules, timeouts, and the outbox must
   hold after every transition.
 
 What is *not* specified is as important as what is. Transport encoding, authentication, search
-handlers (`promise.search`, `task.search`, `schedule.search` are `501` stubs in the spec),
-cron-expression evaluation, and concurrency limits are intentionally left to the implementer. The spec
-does not require HTTP. It does not require JSON. It does not require any specific storage engine.
-Those decisions are yours. The handlers and their state semantics are not.
+semantics (`promise.search`, `task.search`, `schedule.search` are `501` stubs in the spec),
+cron-expression evaluation, and concurrency limits are intentionally left to the implementer. The
+Lean machine does not model HTTP or JSON at all — though the [prose spec's message-passing
+protocol](/spec/execution-model/message-passing#address-schemes) does name HTTP as the required
+transport, with the envelope encoding defined by the reference server. No specific storage engine is
+required. Those decisions are yours. The handlers and their state semantics are not.
 
 <Callout type="info" title="No public conformance suite yet">
 The mechanism that verifies conformance — an oracle-diff harness that replays operation sequences and
@@ -91,8 +94,8 @@ reference server** (protocol version `2026-04-01`, `kind`-multiplexed POST). Any
 SDK points at it unchanged. It is a true drop-in backend swap.
 
 This is an official Resonate HQ project (not a community fork), actively developed. Its test rigor is
-exceptional: oracle-diff against the reference server, random-kill fault injection across 51 named
-invariants, and Porcupine linearizability verification. It is not yet at 1.0 and has known open
+exceptional: oracle-diff against the reference server, random-kill fault injection across 53 named
+invariants (at the time of writing), and Porcupine linearizability verification. It is not yet at 1.0 and has known open
 issues. Label it accordingly — most credible non-reference production story, not yet production-ready.
 
 ### resonatehq/resonate-on-nats — message broker

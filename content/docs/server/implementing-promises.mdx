@@ -152,7 +152,7 @@ Validate in this order:
 
 If the awaited promise is pending and `timeoutAt > now`, **and** the awaiter is also pending and `timeoutAt > now`: add `req.awaiter` to the awaited promise's callbacks list (deduped via `addCallback`).
 
-If either deadline condition fails, or if the awaited promise is already settled: return the awaited promise (possibly projected) without registering the callback. The caller sees the settled state and knows it needs to resume immediately rather than wait.
+If registration is skipped, the response is still `200` with the awaited promise — but the two skip cases look different to the caller. If the awaited promise is already settled (or expired, and therefore projected settled), the caller sees the settled state and knows to resume immediately. But if the awaited is still pending and only the *awaiter's* condition failed (expired or non-pending), the caller receives a `200` carrying a **pending** awaited promise with no signal that the registration was dropped. An SDK must not treat a pending-state `200` from `promise.register_callback` as proof the callback landed.
 
 <Callout type="note" title="The callback condition is conjunctive">
 Both the awaited and the awaiter must be pending and unexpired for a registration to land. If the awaited is pending but the awaiter has already expired, the callback is silently skipped — a dead awaiter has no task to resume. This is intentional: the settlement scrub (P-03) handles the reverse direction (settling the awaited removes its id from other promises' lists), so missing this registration causes no permanent leak.

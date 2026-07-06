@@ -77,7 +77,7 @@ structure ServerConfig where
 
 ## Full enumeration of enqueue sites
 
-These are every spec handler that calls `setMessage`, verified against the Lean files:
+These are every spec handler that *directly* calls `setMessage`, verified against the Lean files. Two handlers also produce messages **transitively**: `task.fence` (T-04) delegates to the full `promiseCreate`/`promiseSettle` handlers, and `onScheduleTimeout`'s catchUp loop calls `promiseCreate` for each fired occurrence — so both inherit those handlers' enqueue behavior, and both must run inside the same transaction scope as the delegated handler's writes:
 
 ### Execute messages
 

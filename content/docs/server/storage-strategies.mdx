@@ -74,7 +74,7 @@ schedules         — id, cron, promise_id, promise_timeout, …
 schedule_timeouts — timeout_at (indexed ASC), id
 ```
 
-Tasks and promises share the same primary key — a task is an extension of its promise, not a separate entity. The `tasks.version` column is the fencing token; every mutating task operation issues a conditional `UPDATE tasks SET version = version + 1 WHERE id = ? AND version = ?` (or equivalent CTE) inside a transaction. Stale version → no rows updated → the handler returns `409`.
+Tasks and promises share the same primary key — a task is an extension of its promise, not a separate entity. The `tasks.version` column is the fencing token, used in two distinct patterns. Acquire transitions (`task.acquire`, and `task.create`'s re-acquire branch) are the only mutations that increment it: `UPDATE tasks SET state = 'acquired', version = version + 1, pid = ?, ttl = ? WHERE id = ? AND version = ?`. Every other version-fenced mutation (`fence`, `suspend`, `fulfill`, `release`) checks without bumping: `UPDATE tasks SET state = ?, … WHERE id = ? AND version = ?`. Either way, stale version → no rows updated → the handler returns `409`.
 
 SQLite runs with WAL mode, `busy_timeout = 5000`, and `foreign_keys = ON`. WAL allows concurrent readers while a writer holds the lock; `busy_timeout` absorbs transient write contention without an immediate error.
 
@@ -84,7 +84,7 @@ SQLite runs with WAL mode, `busy_timeout = 5000`, and `foreign_keys = ON`. WAL a
 
 ### Serialization errors
 
-Postgres (and MySQL) can return serialization errors (`SQLSTATE 40001`) or deadlock errors (`40P01`) on concurrent transactions. The `From<sqlx::Error>` implementation converts these to `StorageError::Serialization`, which the handler layer maps to `503` (retriable, nothing was committed). SQLite avoids this category with its single-writer model.
+Postgres (and MySQL) can return serialization errors (`SQLSTATE 40001`) or deadlock errors (`40P01`) on concurrent transactions. The `From<sqlx::Error>` implementation converts these to `StorageError::Serialization` — documented in `persistence/mod.rs` as "retries exhausted, nothing was committed." Note: the handler layer currently surfaces this as a generic `500`; a distinct retriable `503` is the documented design intent but is not yet implemented in `server.rs`. SQLite avoids this category with its single-writer model.
 
 <Callout type="caution" title="MySQL's VARCHAR(255) limit">
 The MySQL backend maps storage-level constraint violations (oversized field values against `VARCHAR(255)` columns) to `StorageError::InvalidInput`, which becomes `400`. If you are implementing a MySQL backend, size constraints are a real sharp edge: a client that sends a promise id longer than 255 bytes will receive `400`, not `500`. Test this path explicitly.
@@ -191,7 +191,7 @@ If you are implementing storage from scratch, verify each of the following befor
 
 5. **Timeout scan** — you must be able to find all promises, tasks, and schedules whose `timeout_at <= now` without scanning the full dataset. A time-ordered index or a bucket-partitioned time table both work.
 
-6. **Serialization error propagation** — on a lost CAS or a transaction conflict, the handler must return `503` (retriable, nothing committed) to the caller — not `500`, not a silent empty response. The `503` code is a reference-server convention, not part of the Lean model's status vocabulary; see [the status-code table](/server/envelope-and-transport).
+6. **Serialization error propagation** — on a lost CAS or a transaction conflict, fail the whole handler with nothing committed and surface a retriable error to the caller — never a silent empty response, and never a success. Neither the Lean model nor the reference server defines a distinct retriable status today (the reference server surfaces these as `500`; a distinct `503` is its documented design intent) — what matters is that your error is distinguishable and the caller can safely retry. See [the status-code table](/server/envelope-and-transport).
 
 <Callout type="info" title="Timeout scan and multi-record atomicity are the two that bite first">
 Developers who implement storage in layers typically get durability and idempotent creates right early on. The first real pain arrives when a timeout scan starts reading the full table at scale, and the second arrives when a promise settlement commits without writing its callback notifications. Build both correctly from the start rather than retrofitting them.

@@ -37,6 +37,8 @@ def PromiseObject.external (p : PromiseObject) : Bool :=
 
 Promises that carry neither tag — pure callback rendezvous points created by the SDK to coordinate internal workflows — are never added to the promise timeout list. Their only settlement path is an explicit `promise.settle` call from a worker.
 
+One exception to the external-only rule: `task.create` ([`T-02-task.create.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/T-02-task.create.lean), fresh-promise branch) calls `setPromiseTimeout` **unconditionally**, with no externality check — every task-backed promise created through T-02 gets a timeout entry. The tag-gated arming described above is `promise.create`'s (P-02) behavior.
+
 **`taskTimeouts`** carries two logically distinct entries, distinguished by `kind`:
 - `kind = 0`: pending-retry timeout. Set when a task is first created or returned to `pending`. Fires `onTaskRetryTimeout`, which re-issues the execute message.
 - `kind = 1`: lease-expiration timeout. Set when a task is acquired. Fires `onTaskLeaseTimeout`, which reverts the task to pending and re-issues the execute message.

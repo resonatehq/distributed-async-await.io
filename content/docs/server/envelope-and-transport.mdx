@@ -162,7 +162,7 @@ These codes appear in `head.status` on every response. They are protocol-level c
 | `422` | Unprocessable. The request is structurally valid but violates a semantic constraint — for example, an awaiter promise that has no `resonate:target` tag, an awaited promise that does not exist during suspension, or a `task.create` where the promise exists but carries no target. | `promise.register_callback`, `task.create`, `task.suspend`. |
 | `500` | Internal error. Storage failure or unexpected condition. | All handlers (as a catch-all). |
 | `501` | Not implemented. | See below. |
-| `503` | Retriable storage contention (nothing committed). A reference-server extension for serialization failures under concurrent load — not in the Lean model. | Any handler, in the reference server. See [storage strategies](/server/storage-strategies). |
+| `503` | Retriable storage contention (nothing committed). Documented reference-server design intent for serialization failures — not in the Lean model, and **not yet emitted**: the current reference server surfaces these as `500`. | None today. See [storage strategies](/server/storage-strategies). |
 
 ### Notes on the surprising codes
 

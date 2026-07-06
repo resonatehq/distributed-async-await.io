@@ -43,10 +43,10 @@ The [`resonatehq/resonate-specification`](https://github.com/resonatehq/resonate
 
 ## Reference-server debug endpoints
 
-The reference server exposes five debug endpoints, all handled in `oracle.rs`. They are reference-server tooling — they are not defined by the Lean spec — but they work against any server that implements them, and they are the primitives that make seeded simulation tractable.
+The reference server exposes five debug endpoints, implemented in `src/server.rs`; the `Oracle` struct in `src/oracle.rs` implements the same five independently, for use in oracle-diff testing. They are reference-server tooling — they are not defined by the Lean spec — but they work against any server that implements them, and they are the primitives that make seeded simulation tractable.
 
 **`debug.start` / `debug.stop`**  
-Return `200 {}` and change nothing. Use them to bracket a test scenario: send `debug.start` before the first operation, `debug.stop` after the last assertion. In the oracle they are explicit no-ops (lines 130–135 of `oracle.rs`); in the full server they can toggle debug-mode routing if you wire that up.
+Use them to bracket a test scenario: send `debug.start` before the first operation, `debug.stop` after the last assertion. In the oracle they are explicit no-ops returning `200 {}`; in the running reference server they pause and resume the background processing loops (timeout firing, message delivery) so a test can control when those effects happen.
 
 **`debug.reset`**  
 Clears all state — promises, tasks, schedules, all timeout queues, the outbox. Returns `200 {}`. Call this between test cases to get a clean slate without restarting the process.
@@ -69,7 +69,7 @@ Returns the complete current state as a deterministic snapshot:
 The sorting is deliberate: snapshots are structurally comparable without additional normalization. Diff two snapshots and every difference is meaningful, not an ordering artifact.
 
 **`debug.tick`**  
-The most powerful of the five. Send `{"kind": "debug.tick", "head": {"corrId": "...", "debugTime": T}, "data": {"time": T}}`. The oracle advances virtual time to `T` and synchronously fires every timeout that would have matured by `T`:
+The most powerful of the five. Send `{"kind": "debug.tick", "head": {"corrId": "...", "resonate:debug_time": T}, "data": {"time": T}}`. The server advances virtual time to `T` and synchronously fires every timeout that would have matured by `T` (the oracle does this against its in-memory map; the running reference server runs the same timeout processing against persistent storage):
 - Promise timeouts: settles pending promises (timer → `resolved`, else → `rejectedTimedout`), triggers settlement scrub, enqueues `unblock` messages, runs `enqueueResume` on callbacks.
 - Lease timeouts: returns acquired tasks to `pending`, re-arms retry timeout, emits `execute`.
 - Retry timeouts: re-emits `execute` for pending tasks.
@@ -77,8 +77,8 @@ The most powerful of the five. Send `{"kind": "debug.tick", "head": {"corrId": "
 
 This lets your test advance from `T=0` to `T=50000` in a single call and observe exactly the state the spec says should result, without waiting on real-time.
 
-<Callout type="caution" title="debug.tick requires debugTime in the head">
-The `debug.tick` handler validates that `req.head.debug_time == data.time`. Omitting the `debugTime` header or setting it to a different value returns `400`. Set it consistently, because `debugTime` is also what `oracle.rs`'s `resolve_time()` uses as `now` for every other operation — so your time-controlled test sequence must set it on every request, not just `debug.tick`.
+<Callout type="caution" title="Keep resonate:debug_time consistent">
+If `head."resonate:debug_time"` is present on a `debug.tick`, it must equal `data.time` — a mismatch returns `400`. Omitting it is not an error, but then virtual time is not applied to the operation. Set it consistently, because `resonate:debug_time` is also what `resolve_time()` uses as `now` for every other operation — so a time-controlled test sequence must set it on every request, not just `debug.tick`.
 </Callout>
 
 ## The structural invariants: assert after every operation
@@ -105,7 +105,7 @@ The oracle's `debug.snap` response gives you everything you need to check all se
 
 **Diff tests.** Feed the same operation sequences to the ScyllaDB implementation and to the reference server, compare responses and snapshots. This is oracle-diff with the reference server as oracle — the same technique described above. It exercises the full protocol surface under realistic latency.
 
-**Kill tests.** Inject random process kills during operation sequences and verify that the named invariants all hold after recovery. The documented characterization across the project is 51 named invariants checked on every snapshot.
+**Kill tests.** Inject random process kills during operation sequences and verify that the named invariants all hold after recovery. The invariant set lives in `internal/test/invariants.go` — 53 named invariants at the time of writing, checked on every snapshot (the set grows with the project).
 
 **Linearizability tests.** Run concurrent clients and record the history of operations and responses, then pass the history through [Porcupine](https://github.com/anishathalye/porcupine) — a Go implementation of Wing-Gong linearizability checking. A protocol that is explainable by some sequential execution of the abstract machine will produce a linearizable history. If Porcupine finds no valid sequential explanation, the implementation has a consistency bug.
 

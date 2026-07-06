@@ -37,7 +37,7 @@ The path branches on whether the promise already exists.
 
 **Promise absent:**
 
-If `a.timeoutAt > now`: create the promise (`state=pending`) and the task (`state=acquired`, `version=1`, `pid` and `ttl` set from the request). Arm the promise timeout at `p.timeoutAt` (`setPromiseTimeout` — unconditional here, not gated on the promise being external) and the lease timeout. Return `200` with both records. Omit the promise timeout and `onPromiseTimeout` never fires for this promise — listeners are never unblocked and suspended awaiters never wake.
+If `a.timeoutAt > now`: create the promise (`state=pending`) and the task (`state=acquired`, `version=1`, `pid` and `ttl` set from the request). Arm the promise timeout at `p.timeoutAt` (`setPromiseTimeout` — unconditional here, unlike `promise.create`, which arms it only for external promises) and the lease timeout. Return `200` with both records. If your implementation fails to arm the promise timeout, `onPromiseTimeout` never fires for this promise — listeners are never unblocked and suspended awaiters never wake.
 
 If `a.timeoutAt ≤ now`: the window has already closed. Create a pre-settled promise — `state=resolved` for a timer promise, `state=rejectedTimedout` otherwise — and a fulfilled task (`version=0`, no `pid`/`ttl`). Return `200`. The work was never live; treat this the same as finding an already-fulfilled task.
 
@@ -122,7 +122,7 @@ Standard validation: task (404), promise (409), `t.state=acquired` (409), promis
 If all awaited promises are genuinely pending, register the task's id as a callback on each, transition `state=suspended`, clear `pid`/`ttl`/`resumes`, delete the lease timeout. Return `200`.
 
 <Callout type="info" title="300 is not an error — the task stays acquired">
-A `300` from `task.suspend` means at least one awaited promise is already settled. The task was never suspended; it remains `acquired`, and the worker still holds the claim and the version. The worker must check which awaited promises are done, collect their results, and continue driving the execution. Build your worker loop to handle `300` as the fast path for awakenings that race the suspension request.
+A `300` from `task.suspend` means at least one awaited promise is already settled or past its `timeoutAt` deadline (the spec condition is `pa.state != .pending ∨ pa.timeoutAt ≤ now` — an expired-but-stored-pending promise also triggers it). The task was never suspended; it remains `acquired`, and the worker still holds the claim and the version. The worker must check which awaited promises are done, collect their results, and continue driving the execution. Build your worker loop to handle `300` as the fast path for awakenings that race the suspension request.
 </Callout>
 
 ---

@@ -28,7 +28,7 @@ The conversion is explicit. `PromiseObject.toRecord` strips `callbacks` and `lis
 pending | resolved | rejected | rejectedCanceled | rejectedTimedout
 ```
 
-Five variants. A promise starts `pending` and moves to exactly one terminal state. The two `rejected*` variants distinguish a caller-initiated rejection (`rejected`), an administrative cancellation (`rejectedCanceled`), and a timeout expiry (`rejectedTimedout`). `resolved` is the success terminal. See the [durable promise specification](/spec/programming-model/durable-promise-specification) for the semantics of each state.
+Five variants. A promise starts `pending` and moves to exactly one terminal state. The three `rejected*` variants distinguish a caller-initiated rejection (`rejected`), an administrative cancellation (`rejectedCanceled`), and a timeout expiry (`rejectedTimedout`). `resolved` is the success terminal. See the [durable promise specification](/spec/programming-model/durable-promise-specification) for the semantics of each state.
 
 ### PromiseRecord (wire-visible)
 
@@ -132,7 +132,7 @@ Each schedule carries its own timeout entry. When that timeout fires, `onSchedul
 | `taskTimeouts` | `TaskTimeout` | `0` = retry, `1` = lease | `0`: re-enqueues an execute for a pending task; `1`: expires an acquired task's lease |
 | `scheduleTimeouts` | `ScheduleTimeout` | — | Fires a schedule, creating promises for all missed intervals (catchUp) |
 
-The `kind` field on `TaskTimeout` is the only place where a single list entry encodes two distinct behaviors. A pending task has a retry timeout (`kind=0`): if no worker acquires it within `retryTimeout` ms (default 5000), the server re-enqueues the execute message. An acquired task has a lease timeout (`kind=1`): if no heartbeat refreshes it in time, the server evicts the worker. These are separate entries — a task may have both simultaneously only transiently. See [timeouts and projection](/server/timeouts-and-projection) for how projection interacts with both.
+The `kind` field on `TaskTimeout` is the only place where a single list encodes two distinct behaviors. A pending task has a retry timeout (`kind=0`): if no worker acquires it within `retryTimeout` ms (default 5000), the server re-enqueues the execute message. An acquired task has a lease timeout (`kind=1`): if no heartbeat refreshes it in time, the server evicts the worker. The two kinds are always exclusive — a pending task carries exactly one `kind=0` entry, an acquired task exactly one `kind=1` entry, and other states carry none; `delTaskTimeout` (which removes all entries for an id regardless of kind) always runs before `setTaskTimeout` in every handler that transitions between these states, so both kinds are never present at once. See [timeouts and projection](/server/timeouts-and-projection) for how projection interacts with both.
 
 ## Outbox
 
