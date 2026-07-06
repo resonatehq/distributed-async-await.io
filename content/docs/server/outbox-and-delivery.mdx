@@ -1,0 +1,192 @@
+---
+title: "Outbox and delivery"
+pageTitle: "The outbox and message delivery"
+description: "How the server's outbox — part of machine state, not an implementation detail — drives task dispatch and promise unblocking with exactly-two message types and at-least-once delivery."
+hideTitle: true
+---
+
+# The outbox and message delivery
+
+The outbox is not a queue you bolt on after you get the state machine working. It is a field of [`ServerState`](https://github.com/resonatehq/resonate-specification/blob/main/spec/01-objects/state.lean) — the same struct that holds promises, tasks, and schedules — and its entries are written by the same handlers that write state transitions. If your outbox row doesn't commit atomically with the state change that caused it, you have a bug.
+
+```lean
+-- spec/01-objects/state.lean
+structure ServerState where
+  config           : ServerConfig         := {}
+  promises         : List PromiseObject
+  tasks            : List TaskObject
+  ...
+  outbox           : List OutboxEntry     := []
+```
+
+That placement is intentional. The outbox is the server's declaration of what *must* be delivered to the outside world. It says what is pending; the transport says what has been sent. Keeping those two concerns separate is the entire architecture of reliable dispatch.
+
+## Two message types, nothing else
+
+The spec defines exactly two messages:
+
+```lean
+-- spec/01-objects/state.lean:78–81
+inductive Message
+  | execute (taskId : String) (version : Nat)
+  | unblock (promise : PromiseRecord)
+```
+
+**`execute (taskId, version)`** tells a target address to acquire and run a specific task. The version is the current fencing token — not a hint to increment, just the version the worker must present to `task.acquire`. A worker that receives this, acquires successfully, and finds its version stale has already been superseded; it should stop.
+
+**`unblock (promise)`** tells a listener address that a promise they registered on has settled. It carries the full settled promise record — state, value, tags — so the recipient can act without a round-trip fetch.
+
+There is no third type. There is no "heartbeat message" or "cancel message" flowing through the outbox.
+
+## `setMessage` is an upsert
+
+Every enqueue goes through one function:
+
+```lean
+-- spec/01-objects/state.lean:166–170
+def setMessage (address : String) (msg : Message) : M Unit :=
+  modify fun s =>
+    let entry := OutboxEntry.mk address msg
+    let key   := entry.key
+    { s with outbox := entry :: s.outbox.filter (fun e => e.key != key) }
+```
+
+This is a keyed upsert: drop any existing entry with the same key, prepend the new one. Keys are defined as:
+
+```lean
+-- spec/01-objects/state.lean:88–90
+def OutboxEntry.key : OutboxEntry → String
+  | { message := .execute taskId _,  .. } => taskId
+  | { address, message := .unblock p }    => s!"{p.id}:notify:{address}"
+```
+
+**For execute:** keyed by `taskId` alone. Two executes for the same task collapse into one — the later write wins. This is safe: if the retry timeout fires and enqueues a second execute before the first is delivered, the worker will see only one (with the most current version). A stale duplicate from before the upsert has already been dropped.
+
+**For unblock:** keyed by `"{promiseId}:notify:{address}"`. A given (promise, listener) pair produces at most one pending unblock in the outbox. If the promise settles and the listener is registered twice (which `addListener` prevents, but the upsert is the backstop), only one outbox entry exists.
+
+## `retryTimeout` — the re-dispatch cadence
+
+[`ServerConfig`](https://github.com/resonatehq/resonate-specification/blob/main/spec/01-objects/state.lean) carries one field that governs how quickly the server re-offers a task:
+
+```lean
+structure ServerConfig where
+  retryTimeout : Nat := 5000   -- milliseconds
+```
+
+`retryTimeout` is the interval at which a `pending` task re-emits its execute message if no worker has claimed it. Every handler that enqueues an execute also arms a retry-timeout at `now + retryTimeout`. That timeout fires `onTaskRetryTimeout`, which re-emits the execute and arms the timeout again — an automatic re-dispatch loop until a worker acquires the task or the promise is settled.
+
+## Full enumeration of enqueue sites
+
+These are every spec handler that calls `setMessage`, verified against the Lean files:
+
+### Execute messages
+
+| Transition | Handler | Lean file |
+|---|---|---|
+| Promise created with `resonate:target` (no delay, or elapsed delay) | `promiseCreate` | [`P-02-promise.create.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/P-02-promise.create.lean) |
+| Worker releases an acquired task | `taskRelease` | [`T-08-task.release.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/T-08-task.release.lean) |
+| Halted task resumed by operator | `taskContinue` | [`T-10-task.continue.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/T-10-task.continue.lean) |
+| Pending task's retry timeout fires | `onTaskRetryTimeout` | [`02-timeouts.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/02-timeouts.lean) |
+| Acquired task's lease expires | `onTaskLeaseTimeout` | [`02-timeouts.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/02-timeouts.lean) |
+| Awaited promise settles, suspended task wakes | `enqueueResume` | [`00-resume.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/00-resume.lean) |
+
+### Unblock messages
+
+| Transition | Handler | Lean file |
+|---|---|---|
+| Promise settled via `promise.settle` | `promiseSettle` | [`P-03-promise.settle.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/P-03-promise.settle.lean) |
+| Promise settled via `task.fulfill` | `taskFulfill` | [`T-07-task.fulfill.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/T-07-task.fulfill.lean) |
+| Promise timed out | `onPromiseTimeout` | [`02-timeouts.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/02-timeouts.lean) |
+
+All three settlement paths iterate `p.listeners` and call `setMessage address (.unblock p.toRecord)` for each registered listener. All three also call `enqueueResume` for each registered callback — which may produce additional execute messages if the awaiting task was suspended. Miss the `task.fulfill` path and a promise settled through T-07 notifies no one — no error, no signal, just listeners that never fire.
+
+One enqueue site that does **not** send a message: `promise.create` with a `resonate:delay` tag whose deadline has not yet elapsed. The task is created in `pending` and a retry timeout is armed, but no execute is sent immediately — the first dispatch waits for `onTaskRetryTimeout` to fire at the delay instant. This is a named tag behavior, not general spec machinery.
+
+One more: `task.create` creates the task in `acquired` (the calling worker already holds it) and writes no execute to the outbox. The execute appears later, when `task.release` or a timeout transitions the task back to `pending`.
+
+## The resume chain
+
+`enqueueResume` handles the case where an awaited promise settles and the task that was waiting on it needs to be woken:
+
+```lean
+-- spec/02-actions/00-resume.lean
+def enqueueResume (awaitedId awaiterId : String) (now : Nat) : M Unit := do
+  let some t ← getTask awaiterId | pure ()
+  match t.state with
+  | .suspended =>
+      let retryTimeout := (← get).config.retryTimeout
+      let t := { t with state := .pending, resumes := [awaitedId] }
+      setTask t
+      setTaskTimeout t.id 0 (now + retryTimeout)
+      match ← getPromise awaiterId with
+      | none => pure ()
+      | some p =>
+          let target := (p.tags.get? "resonate:target").getD ""
+          if target != "" then
+            setMessage target (.execute t.id t.version)
+  | .pending | .acquired | .halted =>
+      if t.resumes.contains awaitedId then pure ()
+      else setTask { t with resumes := t.resumes ++ [awaitedId] }
+  | .fulfilled => pure ()
+```
+
+Three things worth noting:
+
+**Version is not bumped.** `enqueueResume` sends `(.execute t.id t.version)` — the current version, not an incremented one. The spec comment is explicit: a resume re-emits the current version as a wake-up hint. The version only advances on `task.acquire`. See [tasks and the worker loop](/sdk/tasks-and-the-worker-loop).
+
+**Non-suspended states buffer.** If the task is `pending`, `acquired`, or `halted` when its awaited promise settles, `enqueueResume` doesn't send anything — it appends `awaitedId` to `t.resumes` (deduplicated). The task already has something driving it; the settled promise is recorded and will be visible when the driver next inspects state. If the task is `fulfilled`, it's a no-op.
+
+**Empty target sends nothing.** If the promise's `resonate:target` tag is absent or empty, `enqueueResume` transitions the task to `pending` and arms the retry timeout, but skips the execute. This means a polling worker that re-acquires via `task.acquire` (bypassing push entirely) will still find the task — the retry timeout will re-offer it — but no push message is sent.
+
+<Callout type="caution" title="Suspended tasks have no retry timeout">
+A suspended task carries no task timeout (invariant 6 in the [spec's task model](/spec/system-model/tasks)). The retry timeout is armed only when `enqueueResume` transitions the task to `pending`. Before that, the task is parked indefinitely, waiting on a settlement. This is correct and expected: the wakeup is event-driven, not timer-driven. If the awaited promise never settles (e.g., an eternal external promise), the suspended task waits forever — which is intentional. Timer promises exist precisely to bound that wait. See [timeouts and projection](/server/timeouts-and-projection).
+</Callout>
+
+## Implementation shape: atomic commit, then drain
+
+The outbox only works if the outbox row commits in the same transaction as the state change that caused it. If you write the state, commit, then write the outbox, a crash between the two leaves a task pending with no pending delivery — the task re-surfaces only if a timeout fires later, if one was armed. If you write the outbox and crash before committing the state change, the row is orphaned (benign but noisy). Atomicity is the correct direction.
+
+The reference server (Apache-2.0, [`resonate`](https://github.com/resonatehq/resonate)) implements this in its SQLite and Postgres persistence layers. Every handler runs inside a database transaction (`unchecked_transaction()` → `commit()` in `persistence_sqlite.rs`). The `INSERT INTO outgoing_execute` and `INSERT INTO outgoing_unblock` statements run inside that same transaction, alongside the promise/task/timeout updates. A background delivery loop then drains the outbox:
+
+```rust
+// resonate/src/processing/processing_messages.rs
+let (execute_msgs, unblock_msgs) = storage
+    .transact(move |db| db.take_outgoing(batch_size))
+    .await?;
+```
+
+`take_outgoing` uses `DELETE ... RETURNING` — it atomically removes and returns a batch of rows. This means a message is consumed exactly once by the delivery loop; if the loop crashes after deleting but before delivering, the message is lost. The transport must be prepared to re-send if an upstream retry fires — and the worker must tolerate duplicate executes. See [tasks and the worker loop](/sdk/tasks-and-the-worker-loop) for the version-based deduplication that makes receiving the same execute twice safe.
+
+The loop runs on a configurable `poll_interval` and `batch_size` from the server config. Neither is specified by the DAA protocol — they are reference-server operational parameters. The unblock delivery follows the same pattern.
+
+<Callout type="note" title="At-least-once is the transport's job">
+The spec defines what belongs in the outbox and when. It does not define how deliveries are retried if the network is down when the loop drains a batch. The reference server's delivery loop is fire-and-forget per batch: it deletes the rows, dispatches, and moves on. Retry, backoff, and transport-level deduplication are implementation concerns above the spec floor. The retry timeout (`onTaskRetryTimeout`) re-enqueues execute messages for tasks that were never acquired — so for execute, the spec itself provides a recovery path at the cost of `retryTimeout` latency. For unblock, a listener that misses its delivery window has no built-in recovery; the listener address is the worker's responsibility to keep alive.
+</Callout>
+
+## Wire shape
+
+The reference server serializes execute messages as:
+
+```json
+{
+  "kind": "execute",
+  "head": { "serverUrl": "https://my-server.example.com" },
+  "data": { "task": { "id": "my-task-id", "version": 3 } }
+}
+```
+
+And unblock messages as:
+
+```json
+{
+  "kind": "unblock",
+  "head": {},
+  "data": { "promise": { "id": "...", "state": "resolved", ... } }
+}
+```
+
+The wire encoding and address format are transport-specific and unspecified by the DAA protocol. For address semantics and the full picture of delivery on the wire, see [message passing](/spec/execution-model/message-passing). For how to implement the task side of this flow, see [implementing tasks](/server/implementing-tasks).
+
+---
+
+*Verified against [resonate-specification`@83d64c3`](https://github.com/resonatehq/resonate-specification/tree/83d64c3).*

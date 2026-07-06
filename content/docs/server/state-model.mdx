@@ -1,0 +1,166 @@
+---
+title: "State model"
+pageTitle: "State model: records, enums, and internal fields"
+description: "The exact structure of every object in ServerState — PromiseObject, TaskObject, Schedule, timeout lists, and outbox — including which fields appear on the wire and which are internal-only."
+hideTitle: true
+---
+
+# State model: records, enums, and internal fields
+
+The [abstract machine](/server/abstract-machine) holds all its knowledge in a single `ServerState`. This chapter walks every component of that state: the records, their fields, which fields cross the wire, and which are internal implementation details the spec uses but never exposes to callers.
+
+The canonical source for everything here is [`spec/01-objects/types.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/01-objects/types.lean) (wire records and enums) and [`spec/01-objects/state.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/01-objects/state.lean) (internal objects, effects, and `ServerState`). Read these files directly when a detail matters for your implementation.
+
+## Two levels: internal objects and wire records
+
+The spec defines two shapes for each entity:
+
+- **Internal object** (`PromiseObject`, `TaskObject`) — what the machine stores. Contains all fields including ones that are never serialized.
+- **Wire record** (`PromiseRecord`, `TaskRecord`) — what appears in request/response bodies. A strict subset of the internal object.
+
+The conversion is explicit. `PromiseObject.toRecord` strips `callbacks` and `listeners`. `TaskObject.toRecord` strips `resumes` (as a `List String`) and replaces it with `resumes.length` (a count). If you store more than the wire record in your database, those extra fields are implementation internals that callers will never see and must never rely on.
+
+## Promises
+
+### PromiseState
+
+```text
+pending | resolved | rejected | rejectedCanceled | rejectedTimedout
+```
+
+Five variants. A promise starts `pending` and moves to exactly one terminal state. The two `rejected*` variants distinguish a caller-initiated rejection (`rejected`), an administrative cancellation (`rejectedCanceled`), and a timeout expiry (`rejectedTimedout`). `resolved` is the success terminal. See the [durable promise specification](/spec/programming-model/durable-promise-specification) for the semantics of each state.
+
+### PromiseRecord (wire-visible)
+
+| Field | Type | Meaning |
+|---|---|---|
+| `id` | `String` | Unique promise identifier |
+| `state` | `PromiseState` | Current state |
+| `param` | `Value` | Input value set at creation; immutable |
+| `value` | `Value` | Output value; meaningful only when settled |
+| `tags` | `Tags` | Key-value pairs; `resonate:target` and `resonate:timer` drive machine behavior |
+| `timeoutAt` | `Nat` | Unix ms deadline; past this instant a pending promise is *projected* as already settled |
+| `createdAt` | `Nat` | Unix ms creation timestamp |
+| `settledAt` | `Option Nat` | Unix ms settlement timestamp; `none` while pending |
+
+`Value` is `{ headers : Tags, data : Option String }`. `Tags` is `List (String × String)`. Both appear on the wire as-is.
+
+### PromiseObject (internal — adds two fields)
+
+| Field | Type | Wire-visible? | Meaning |
+|---|---|---|---|
+| *(all PromiseRecord fields)* | — | Yes | See above |
+| `callbacks` | `List String` | **No** | Awaiter promise IDs registered on this promise; flushed and replaced with resume messages when the promise settles |
+| `listeners` | `List String` | **No** | Addresses subscribed for an `unblock` message when the promise settles |
+
+`callbacks` holds promise IDs, not task IDs. When a task suspends waiting for a promise to settle, the server adds the *awaiter's promise ID* (which equals the awaiter's task ID) to the awaited promise's `callbacks` list. `listeners` holds delivery addresses (strings). Both lists are deduplicated: adding an entry that already exists is a no-op.
+
+### External and timer promises
+
+Two predicate functions on `PromiseObject` matter throughout the machine:
+
+- **External promise**: `p.tags.has "resonate:target" || p.isTimer` — a promise that triggers work outside the machine (a worker execution or a timer). External promises always have a corresponding task.
+- **Timer promise**: `p.tags.get? "resonate:timer" == some "true"` — a special external promise that settles `resolved` (not `rejectedTimedout`) when its `timeoutAt` elapses.
+
+See [tasks](/spec/system-model/tasks) for how `resonate:target` causes a task and an execute message to be created alongside the promise.
+
+## Tasks
+
+### TaskState
+
+```text
+pending | acquired | suspended | halted | fulfilled
+```
+
+Five variants. `fulfilled` is the only terminal state; `halted` is an administrative state that a task enters via `task.halt` and leaves via `task.continue` (which returns it to `pending`). A task in `halted` is out of circulation: it holds no lease and no retry timeout. Your monitoring should surface halted tasks explicitly — they will not self-recover.
+
+### TaskRecord (wire-visible)
+
+| Field | Type | Wire-visible? | Meaning |
+|---|---|---|---|
+| `id` | `String` | Yes | Task identifier; equals its promise's id |
+| `state` | `TaskState` | Yes | Current state |
+| `version` | `Nat` | Yes | Fencing token; increments on each `task.acquire` |
+| `resumes` | `Nat` | Yes | **Count only** — number of buffered settled-awaited IDs |
+| `ttl` | `Option Nat` | Yes | Lease deadline (Unix ms); `none` when not acquired |
+| `pid` | `Option String` | Yes | Worker process ID holding the lease; `none` when not acquired |
+
+### TaskObject (internal — `resumes` is richer)
+
+| Field | Type | Wire-visible? | Meaning |
+|---|---|---|---|
+| *(all TaskRecord fields except `resumes`)* | — | Yes | See above |
+| `resumes` | `List String` | **No** (exposed as `.length`) | Settled promise IDs that triggered this task's re-pending while it was suspended, pending, acquired, or halted; deduplicated |
+
+The `resumes` divergence is the sharpest difference between the two levels. On the wire, `resumes` is a count — a worker can observe that multiple settlements fired while it was away but cannot see which ones without looking up the awaited promises individually. Internally, the machine stores the actual IDs so that `enqueueResume` can deduplicate.
+
+### Version and lease
+
+**Version** (`version : Nat`) is the fencing token. It increments on every `pending→acquired` transition — in `task.acquire` (see [`T-03-task.acquire.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/T-03-task.acquire.lean)) and in the re-acquire branch of `task.create` ([`T-02-task.create.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/T-02-task.create.lean)). No other operation changes it. A task returning to `pending` after a lease expiry or a `task.release` keeps its current version; the next `task.acquire` bumps it. Every mutating operation on a task (`fence`, `suspend`, `fulfill`, `release`) must present the current version and receives `409` if the version has moved on. This is how a stale worker's writes are rejected.
+
+**Lease** is `ttl`+`pid` together. `ttl` is the Unix ms deadline after which the server considers the worker dead; `pid` identifies which worker holds it. Both are `none` when a task is not acquired. Both are set on `task.acquire` and cleared on `task.suspend` (the task parks without a lease; it is woken by settlement, not by a clock). A lease timeout fires `onTaskLeaseTimeout`, which returns the task to `pending`, clears `ttl` and `pid`, and re-enqueues an execute message — all without advancing the version.
+
+<Callout type="caution" title="Version advances on acquire, not on lease expiry">
+The machine carries a task back to `pending` at its current version when the lease lapses. The version advances on the *next* `task.acquire`. A test that asserts "version incremented the instant the lease expired" will fail against a correct implementation. Assert instead that once any worker re-acquires, the version is strictly greater than what the previous holder saw.
+</Callout>
+
+## Schedules
+
+A `Schedule` is a recurring cron rule. The machine stores it as a single record with no internal-only variant:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `id` | `String` | Schedule identifier |
+| `cron` | `String` | Cron expression (implementation-defined interpretation via `opaque nextCron`) |
+| `promiseId` | `String` | Template for promise IDs created at each fire; expanded via `opaque expand` |
+| `promiseTimeout` | `Nat` | `timeoutAt` offset (ms) applied to each created promise |
+| `promiseParam` | `Value` | `param` for each created promise |
+| `promiseTags` | `Tags` | `tags` for each created promise |
+| `nextRunAt` | `Nat` | Unix ms of next scheduled fire |
+| `lastRunAt` | `Option Nat` | Unix ms of last fire; `none` before the first |
+| `createdAt` | `Nat` | Unix ms creation timestamp |
+
+Each schedule carries its own timeout entry. When that timeout fires, `onScheduleTimeout` calls `catchUp` — which loops, creating promises for every missed fire since the last run, advancing `nextRunAt` after each one, until the schedule is current. See [timeouts and projection](/server/timeouts-and-projection) for the full catchUp semantics.
+
+## Timeout lists
+
+`ServerState` has three timeout lists. Each entry is a `(id, timeout)` pair the environment is expected to fire when `now ≥ timeout`:
+
+| List | Entry type | `kind` field | When fired |
+|---|---|---|---|
+| `promiseTimeouts` | `PromiseTimeout` | — | Settles a pending promise as `rejectedTimedout` (or `resolved` for timers) |
+| `taskTimeouts` | `TaskTimeout` | `0` = retry, `1` = lease | `0`: re-enqueues an execute for a pending task; `1`: expires an acquired task's lease |
+| `scheduleTimeouts` | `ScheduleTimeout` | — | Fires a schedule, creating promises for all missed intervals (catchUp) |
+
+The `kind` field on `TaskTimeout` is the only place where a single list entry encodes two distinct behaviors. A pending task has a retry timeout (`kind=0`): if no worker acquires it within `retryTimeout` ms (default 5000), the server re-enqueues the execute message. An acquired task has a lease timeout (`kind=1`): if no heartbeat refreshes it in time, the server evicts the worker. These are separate entries — a task may have both simultaneously only transiently. See [timeouts and projection](/server/timeouts-and-projection) for how projection interacts with both.
+
+## Outbox
+
+`outbox : List OutboxEntry` is the machine's pending delivery queue. Each entry is:
+
+```lean
+structure OutboxEntry where
+  address : String
+  message : Message   -- execute (taskId version) | unblock (promise : PromiseRecord)
+```
+
+Two message types exist:
+
+- **`execute taskId version`** — dispatches a task to a worker at `address`. Carries the task's *current* version (not incremented by the enqueue; the next acquire will increment it).
+- **`unblock promise`** — notifies a listener at `address` that a promise has settled. Carries the settled `PromiseRecord`.
+
+Outbox entries are keyed: `setMessage` deduplicates by `taskId` for execute messages, and by `"{promiseId}:notify:{address}"` for unblock messages. A handler that enqueues the same message twice leaves only one entry. Your delivery layer reads and drains the outbox; the spec says nothing about delivery guarantees or ordering beyond the keying rule. See [outbox and delivery](/server/outbox-and-delivery) for implementation strategies.
+
+## Cross-reference
+
+The objects defined here appear throughout the prose specification:
+
+- Promise lifecycle and promise states: [durable promise specification](/spec/programming-model/durable-promise-specification)
+- Task lifecycle, invariants, and version semantics: [tasks](/spec/system-model/tasks)
+- How timeout projection makes a pending-but-expired promise read as already settled: [timeouts and projection](/server/timeouts-and-projection)
+
+The abstract machine chapter preceding this one covers `M`, effects, and handler structure: [abstract machine](/server/abstract-machine).
+
+---
+
+*Verified against [`resonate-specification@83d64c3`](https://github.com/resonatehq/resonate-specification/tree/83d64c3).*

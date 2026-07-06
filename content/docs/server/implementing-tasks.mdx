@@ -1,0 +1,204 @@
+---
+title: "Implementing tasks"
+pageTitle: "Implementing tasks: the full handler reference"
+description: "Spec-precise implementation notes for the nine specified task handlers — create, acquire, fence, heartbeat, suspend, fulfill, release, halt, continue — plus task.get and the unimplemented search stub."
+hideTitle: true
+---
+
+# Implementing tasks: the full handler reference
+
+This chapter walks every task handler in the spec — what it validates, what state it writes, and where the sharp edges live. Read [the task model](/spec/system-model/tasks) for the invariants your state must satisfy at all times, and [implementing promises](/server/implementing-promises) before this chapter — `task.fence` delegates directly to those handlers.
+
+The mutating handlers share a common validation spine for acquired-task operations: task exists (404), promise exists (409), task state correct (409), promise pending and unexpired (409), version matches (409). Learn the pattern once and each handler is a short diff from it.
+
+---
+
+## `task.get` (T-01)
+
+[`T-01-task.get.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/T-01-task.get.lean) — a read with a projection rule.
+
+If the task is not found — or the task is found but its promise is not — return `404`. If both exist and the associated promise is `pending` with `timeoutAt > now`, return the stored task record as-is (`200`). Otherwise return a synthesized record with `state=fulfilled`, `pid=null`, `ttl=null`, `resumes=[]` — also `200`.
+
+```text
+task or promise not found → 404
+promise pending + unexpired → 200 (real record)
+promise settled or expired  → 200 (projected fulfilled)
+```
+
+The projection is a read-time transformation, not a write. The stored task record is unchanged; you are presenting the logical state the client should see once a promise can no longer be fulfilled. Full projection semantics are described in [timeouts and projection](/server/timeouts-and-projection).
+
+---
+
+## `task.create` (T-02)
+
+[`T-02-task.create.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/T-02-task.create.lean) — atomic promise creation with immediate task acquisition.
+
+The path branches on whether the promise already exists.
+
+**Promise absent:**
+
+If `a.timeoutAt > now`: create the promise (`state=pending`) and the task (`state=acquired`, `version=1`, `pid` and `ttl` set from the request). Arm the promise timeout at `p.timeoutAt` (`setPromiseTimeout` — unconditional here, not gated on the promise being external) and the lease timeout. Return `200` with both records. Omit the promise timeout and `onPromiseTimeout` never fires for this promise — listeners are never unblocked and suspended awaiters never wake.
+
+If `a.timeoutAt ≤ now`: the window has already closed. Create a pre-settled promise — `state=resolved` for a timer promise, `state=rejectedTimedout` otherwise — and a fulfilled task (`version=0`, no `pid`/`ttl`). Return `200`. The work was never live; treat this the same as finding an already-fulfilled task.
+
+**Promise exists:**
+
+First check: the existing promise must carry the `resonate:target` tag. If it does not, return `422`.
+
+Then look up the task:
+
+| Task state | Response |
+|---|---|
+| No task found | `409` |
+| `fulfilled` | `200`, returned as-is |
+| `pending` | re-acquire: `version++`, `state=acquired`, set `pid`/`ttl`, clear `resumes`, delete retry timeout, arm lease timeout; `200` |
+| `acquired`, `suspended`, or `halted` | `409` |
+
+<Callout type="caution" title="resonate:target is only checked on existing promises">
+A fresh `task.create` whose promise does not yet exist succeeds whether or not the request carries a `resonate:target` tag — the tag check does not appear in the absent-promise branch of the spec. The check fires only when the promise already exists. Do not pre-validate tag presence on a fresh create; you will reject requests the spec accepts.
+</Callout>
+
+---
+
+## `task.acquire` (T-03)
+
+[`T-03-task.acquire.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/T-03-task.acquire.lean) — the standard entry point for a worker claiming a dispatched task.
+
+Validate in this order:
+
+1. Task not found → `404`.
+2. Promise not found → `409`.
+3. `t.state != .pending` → `409`.
+4. `p.state != .pending` or `p.timeoutAt ≤ now` → `409`.
+5. `t.version != req.version` → `409`.
+
+On success: `version++`, `state=acquired`, set `pid`/`ttl`, clear `resumes`, delete the retry timeout, arm the lease timeout. Return `200` with both records. Clearing `resumes` matters: a task can accumulate buffered wakeups while `pending` (awaited promises settling before re-acquire), and the acquiring worker must not see a prior cycle's phantom resumes.
+
+**Version semantics — read this carefully.**
+
+Version increments on every `pending→acquired` transition. That transition happens in two places: `task.acquire` (T-03) and the re-acquire branch of `task.create` (T-02, when the promise exists and the task is `pending`). It does not change anywhere else.
+
+<Callout type="danger" title="Version does NOT increment when a task returns to pending">
+An earlier draft of the protocol prose described this inverted — as if version incremented at the moment a task returned to `pending`. The Lean spec is unambiguous: the `version + 1` expression appears only in the `pending→acquired` branches of T-02 and T-03. `task.release` (T-08), `task.continue` (T-10), lease-expiry recovery, and the resume path (`00-resume.lean`) all return a task to `pending` at its stored version. The *next* acquire bumps it.
+
+If your implementation increments version on release or lease expiry, the execute message that re-dispatches the task will carry the wrong (pre-bump) version, and a correct worker will fail its version check on acquire.
+</Callout>
+
+---
+
+## `task.fence` (T-04)
+
+[`T-04-task.fence.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/T-04-task.fence.lean) — version-guarded delegation to promise handlers.
+
+Validate: task exists (404), promise exists (409), `t.state=acquired` (409), promise `pending+unexpired` (409), version match (409). On success, delegate to the **full** `promise.create` or `promise.settle` handler — the complete implementation including task dispatch and settlement chains, not a stripped copy. The outer response status is always `200` (the fence succeeded); the inner action result carries its own status, which the caller must inspect.
+
+This is how a worker makes writes safe against its own zombie predecessors. A process that lost its lease cannot pass the version check; it discovers it is dead before it acts, not after. See [implementing promises](/server/implementing-promises) for the handler semantics being delegated to.
+
+---
+
+## `task.heartbeat` (T-05)
+
+[`T-05-task.heartbeat.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/T-05-task.heartbeat.lean) — lease refresh for a batch of tasks.
+
+The server iterates `req.tasks`. For each entry, it checks: task exists, `state=acquired`, `version=ref.version`, `pid=req.pid`, and the associated promise is `pending+unexpired`. If all conditions hold, it deletes the existing timeout and arms a new one at `now + t.ttl`. Entries that fail any check are silently skipped.
+
+Response is always `200`. There is **no error signal for a lost task** in the heartbeat response. If another worker has re-acquired a listed task, the heartbeat simply doesn't refresh it. The original worker learns about the loss on its next mutation attempt, which returns `409`.
+
+Two corollaries for your implementation:
+
+- Do not infer from a `200` heartbeat that all listed tasks are still live.
+- The server does not look up tasks by `pid`; it only validates the tasks explicitly named in `req.tasks`. A task absent from the list — even one held by the requesting worker — will not have its lease refreshed.
+
+---
+
+## `task.suspend` (T-06)
+
+[`T-06-task.suspend.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/T-06-task.suspend.lean) — park on awaited promises.
+
+Standard validation: task (404), promise (409), `t.state=acquired` (409), promise `pending+unexpired` (409), version match (409). Each action in `req.actions` names an awaited promise; if any named promise does not exist, return `422`.
+
+**Before committing the suspension**, scan every awaited promise. If any is already settled or expired (`p.state != .pending` or `p.timeoutAt ≤ now`), do not suspend. Instead: clear the task's `resumes` field (reset any buffered wakeups), and return `300`. The task remains `acquired`. The worker must handle the awakenings in-band.
+
+If all awaited promises are genuinely pending, register the task's id as a callback on each, transition `state=suspended`, clear `pid`/`ttl`/`resumes`, delete the lease timeout. Return `200`.
+
+<Callout type="info" title="300 is not an error — the task stays acquired">
+A `300` from `task.suspend` means at least one awaited promise is already settled. The task was never suspended; it remains `acquired`, and the worker still holds the claim and the version. The worker must check which awaited promises are done, collect their results, and continue driving the execution. Build your worker loop to handle `300` as the fast path for awakenings that race the suspension request.
+</Callout>
+
+---
+
+## `task.fulfill` (T-07)
+
+[`T-07-task.fulfill.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/T-07-task.fulfill.lean) — atomic settlement of promise and task.
+
+Standard validation. On success:
+
+1. Settle the promise: write `state`, `value`, `settledAt`; clear `callbacks` and `listeners`.
+2. Delete the promise timeout.
+3. Set task to `fulfilled`: clear `pid`, `ttl`, `resumes`.
+4. Delete the task timeout.
+5. **Settlement scrub:** scan all pending promises and remove the just-fulfilled promise's id from their callback lists. A callback pointing at a now-fulfilled promise is unreachable, and leaving stale registrations would violate the invariant that no suspended task holds a dead callback.
+6. Emit an `unblock` message to every listener address.
+7. Call `enqueueResume` for every awaiter callback — waking each suspended task that was waiting on this promise.
+
+Steps 6 and 7 are the settlement propagation chain. See [outbox and delivery](/server/outbox-and-delivery) for how outbox messages reach workers.
+
+---
+
+## `task.release` (T-08)
+
+[`T-08-task.release.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/T-08-task.release.lean) — return a task from `acquired` to `pending`.
+
+Standard validation. On success: `state=pending`, clear `pid`/`ttl`, delete the lease timeout, arm a retry timeout. Emit an execute message to `resonate:target` carrying the task's **current version** (not incremented).
+
+The task is now claimable again. The version in the execute message is the version the next worker will present to `task.acquire`, which will then bump it. Emitting the current version is correct; do not pre-increment it here.
+
+---
+
+## `task.halt` and `task.continue` (T-09, T-10)
+
+Administrative pause and resume — not part of the normal worker loop.
+
+**`task.halt` ([T-09](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/T-09-task.halt.lean)):**
+
+Look up the task (404 if absent). Then:
+
+- `state=fulfilled` → `409`.
+- `state=halted` → `200` (idempotent).
+- Any other state (`pending`, `acquired`, `suspended`) → `state=halted`, clear `pid`/`ttl`, delete task timeout → `200`.
+
+There is **no version check** and no promise lookup. `task.halt` is an administrative override; it does not require the caller to be the current claimant.
+
+**`task.continue` ([T-10](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/T-10-task.continue.lean)):**
+
+Look up the task (404 if absent). If `state != .halted` → `409`. Look up the promise (404 if absent). On success: `state=pending`, arm a retry timeout, emit an execute message with the current version. Return `200`.
+
+A halted task holds no lease and no retry slot but retains its version. The next `task.acquire` bumps the version as usual.
+
+---
+
+## The resume path
+
+`enqueueResume` is an internal operation called for each callback on a settling promise — by `task.fulfill` (T-07), by `promise.settle` (P-03), and by the `onPromiseTimeout` transition. It is not an HTTP handler; your server calls it directly during settlement.
+
+Source: [`00-resume.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/00-resume.lean).
+
+| Awaiting task state | Action |
+|---|---|
+| `suspended` | `state=pending`, `resumes=[awaitedId]`, arm retry timeout, emit execute with **current version** (only if the awaiter promise exists with a non-empty `resonate:target`) |
+| `pending`, `acquired`, or `halted` | Buffer `awaitedId` in `task.resumes` (deduplicated); no state change, no execute |
+| `fulfilled` | No-op |
+
+The execute message on resume carries the pre-acquire version. This is correct: the worker that receives the execute calls `task.acquire` with that version, and `task.acquire` is what bumps it. Bumping here would put the execute message out of sync with the stored version, breaking the version check on the next acquire.
+
+The buffering behavior for `pending`/`acquired`/`halted` tasks ensures that a wakeup arriving while a task is already running (or paused) is not lost. The worker reads the accumulated `resumes` field when it next inspects its task record.
+
+---
+
+## `task.search` (T-11)
+
+[`T-11-task.search.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/T-11-task.search.lean) returns `501 Not Implemented`. The filtering contract is unspecified. See [unspecified surface](/server/unspecified-surface).
+
+---
+
+*Verified against [resonate-specification`@83d64c3`](https://github.com/resonatehq/resonate-specification/tree/83d64c3).*
