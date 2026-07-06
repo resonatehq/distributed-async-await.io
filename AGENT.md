@@ -20,8 +20,8 @@ Resonate" — and never hosts protocol-normative prose.
 
 > The Distributed Async Await protocol is specified twice, on purpose.
 > [`resonatehq/resonate-specification`](https://github.com/resonatehq/resonate-specification) is the
-> executable abstract machine in Lean 4 — the normative, machine-checkable definition of every handler
-> and state transition. These pages are the prose specification: the human-readable companion that
+> executable abstract machine in Lean 4 — the normative, machine-checkable definition of the protocol's core handlers
+> and state transitions. These pages are the prose specification: the human-readable companion that
 > explains the same protocol. Where prose and Lean disagree, the Lean model wins.
 
 ## Drift rule (binding)

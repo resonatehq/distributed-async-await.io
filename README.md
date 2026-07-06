@@ -11,8 +11,8 @@ The home of the **Distributed Async Await protocol**, in three tracks:
 
 The Distributed Async Await protocol is specified twice, on purpose.
 [github.com/resonatehq/resonate-specification](https://github.com/resonatehq/resonate-specification) is
-the executable abstract machine in Lean 4 — the normative, machine-checkable definition of every handler
-and state transition. This site is the prose specification: the human-readable companion that explains
+the executable abstract machine in Lean 4 — the normative, machine-checkable definition of the protocol's core handlers
+and state transitions. This site is the prose specification: the human-readable companion that explains
 the same protocol. Where prose and Lean disagree, the Lean model wins.
 
 For how to *use* Resonate, the protocol's reference implementation, see
