@@ -207,7 +207,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const page = source.getPage(slug);
   if (!page) return {};
 
-  const title = page.data.title;
+  const title = page.data.pageTitle ?? page.data.title;
   const description =
     page.data.description || `${title} — Distributed Async Await`;
 
