@@ -79,4 +79,4 @@ Close the loop with the scenario this chapter opened on. A worker boots. It has 
 
 This is why two disciplines from earlier chapters are load-bearing here: register every durable function at startup *before* you start receiving work, and keep names stable across deploys (version them rather than rename them). A name that resolves on the process that created an execution but not on the process that resumes it is the one bug that turns durable execution back into ordinary, mortal execution.
 
-Next: [replay and deterministic execution](/replay-and-determinism) — what actually happens when that resumed worker re-runs a function whose steps are already half-recorded.
+Next: [replay and deterministic execution](/sdk/replay-and-determinism) — what actually happens when that resumed worker re-runs a function whose steps are already half-recorded.

@@ -7,7 +7,9 @@ import ThemeToggle from "./ThemeToggle";
 import SearchDialog from "./SearchDialog";
 
 const navLinks = [
-  { label: "Spec", href: "https://docs.resonatehq.io/spec", external: true },
+  { label: "Specification", href: "/spec", external: false },
+  { label: "Build a server", href: "/server", external: false },
+  { label: "Build an SDK", href: "/sdk", external: false },
   { label: "Docs", href: "https://docs.resonatehq.io", external: true },
   { label: "Ask Echo", href: "https://echo.resonatehq.io", external: true },
   { label: "Discord", href: "https://www.resonatehq.io/discord", external: true },
@@ -53,7 +55,7 @@ export default function Navigation() {
               href="/"
               className="font-display text-xl font-semibold tracking-tight text-accent-ember-500 hover:text-accent-ember-600 transition focus-visible:outline-2 focus-visible:outline-secondary"
             >
-              Handbook
+              Protocol
             </Link>
           </div>
 
@@ -81,7 +83,7 @@ export default function Navigation() {
             </a>
             <ThemeToggle />
             <Link
-              href="/introduction"
+              href="/sdk/introduction"
               className="ml-2 bg-accent-ember text-surface-light px-4 py-2 text-sm font-semibold hover:bg-accent-ember-600 transition focus-visible:outline-2 focus-visible:outline-secondary focus-visible:outline-offset-2"
             >
               Start reading
@@ -128,7 +130,7 @@ export default function Navigation() {
             </div>
             <div className="pt-2 px-4">
               <Link
-                href="/introduction"
+                href="/sdk/introduction"
                 className="block text-center bg-accent-ember text-surface-light px-4 py-3 font-semibold hover:bg-accent-ember-600 transition"
               >
                 Start reading

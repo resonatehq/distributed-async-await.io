@@ -3,9 +3,9 @@ import { Github } from "lucide-react";
 
 const footerLinks = {
   handbook: [
-    { label: "Start reading", href: "/introduction" },
-    { label: "The protocol at a glance", href: "/protocol-at-a-glance" },
-    { label: "Specification", href: "https://docs.resonatehq.io/spec" },
+    { label: "Specification", href: "/spec" },
+    { label: "Build a server", href: "/server" },
+    { label: "Build an SDK", href: "/sdk" },
     { label: "Resonate docs", href: "https://docs.resonatehq.io" },
   ],
   community: [
@@ -75,7 +75,7 @@ export default function Footer() {
 
           {/* Product */}
           <div>
-            <h3 className="font-display text-sm font-semibold text-bright-gray-900 dark:text-white mb-4">Handbook</h3>
+            <h3 className="font-display text-sm font-semibold text-bright-gray-900 dark:text-white mb-4">Protocol</h3>
             <ul className="space-y-2">
               {footerLinks.handbook.map((link) => (
                 <li key={link.label}><FooterLink href={link.href}>{link.label}</FooterLink></li>

@@ -1,59 +1,38 @@
 ---
 title: "Home"
-pageTitle: "How to build a Resonate SDK"
-description: "A handbook for developers implementing the Distributed Async Await protocol in their own language — from the protocol mental model to production concerns."
+pageTitle: "Distributed Async Await"
+description: "The protocol specification, server implementers' guide, and SDK authors' handbook for Distributed Async Await."
 hideTitle: true
 ---
 
-# How to build a Resonate SDK
+# Distributed Async Await
 
-There is a formal protocol specification with two complementary surfaces: [**resonate-specification**](https://github.com/resonatehq/resonate-specification) — the Resonate protocol as an executable abstract machine in Lean 4, the machine-checkable ground truth for handler and state-transition semantics — and the [**Distributed Async Await prose spec**](https://docs.resonatehq.io/spec), which defines the promise lifecycle, task model, and invariants a correct implementation must hold. There are three reference SDKs — [TypeScript](https://github.com/resonatehq/resonate-sdk-ts), [Python](https://github.com/resonatehq/resonate-sdk-py), and [Rust](https://github.com/resonatehq/resonate-sdk-rs) — that implement it. The layer between them is what this handbook is for: how you turn the protocol into a library that feels native to your language and that someone actually wants to use.
+**Distributed Async Await** is a protocol for durable execution: a set of rules that lets a function survive process crashes, resume where it left off, and appear to a developer as if it ran uninterrupted. Any conformant server and any conformant SDK interoperate.
 
-It is written for the person building the next SDK.
-
-<Callout type="info" title="Spec tells you what; the handbook teaches you how">
-The normative protocol definition is the [Lean 4 executable abstract machine](https://github.com/resonatehq/resonate-specification) — the machine-checkable ground truth for every handler and state transition. The [Distributed Async Await prose spec](https://docs.resonatehq.io/spec) documents the same protocol in a human-readable form: the promise lifecycle, the task and message model, the invariants a correct implementation must hold. This handbook assumes both as ground truth and teaches the layer above them — the design decisions, the idioms, and the traps that turn a wire-correct client into an idiomatic SDK.
+<Callout type="info" title="The spec is specified twice, on purpose">
+[`resonatehq/resonate-specification`](https://github.com/resonatehq/resonate-specification) is the executable abstract machine in Lean 4 — the normative, machine-checkable definition of every handler and state transition. These pages are the prose specification: the human-readable companion that explains the same protocol. Where prose and Lean disagree, the Lean model wins.
 </Callout>
 
-## How the handbook is organized
+## Three tracks
 
-Fourteen chapters, in the order you need them. The arc runs from *why an SDK exists at all* to *what it takes to run one in production*.
+<CardGrid>
+  <Card
+    title="Specification"
+    description="The protocol defined: promise lifecycle, task model, message-passing, system model, and glossary. The authoritative prose reference."
+    href="/spec"
+  />
+  <Card
+    title="Build a server"
+    description="How to implement a conformant Distributed Async Await server — from the abstract machine and state model through storage strategies and conformance testing."
+    href="/server"
+  />
+  <Card
+    title="Build an SDK"
+    description="How to build a Resonate SDK in any language — from the protocol mental model through production concerns."
+    href="/sdk"
+  />
+</CardGrid>
 
-<DocCardList
-  items={[
-    {
-      type: "link",
-      label: "Mental model",
-      href: "/introduction",
-      description: "Why an SDK exists, and the protocol at a glance. Start here.",
-    },
-    {
-      type: "link",
-      label: "Building the client",
-      href: "/talking-to-the-server",
-      description: "The server connection, the promise lifecycle in code, the worker loop, and the invocation surface.",
-    },
-    {
-      type: "link",
-      label: "Hard concepts",
-      href: "/replay-and-determinism",
-      description: "Replay, deterministic execution, the settlement chain, and coroutines in your language.",
-    },
-    {
-      type: "link",
-      label: "Robustness & production",
-      href: "/time-retries-policies",
-      description: "Time and retries, codecs, local mode, conformance testing, and production concerns.",
-    },
-  ]}
-/>
+## Also
 
-## Who this is for
-
-You are comfortable in at least one language and you want to bring durable execution to it — because your community lives there, or because the runtime model is a better fit than the reference SDKs. You do not need to have read the server source. You do need to be willing to think about determinism, idempotency, and what happens when a process dies mid-flight.
-
-If instead you want to *use* Resonate — build agents, workflows, and services on an existing SDK — you want the [Resonate docs](https://docs.resonatehq.io), not this handbook.
-
-## Have a question while you read
-
-[Echo](https://echo.resonatehq.io) is Resonate's docs assistant, and it knows these pages and the spec. If something here is unclear, ask it — it answers with citations back into the source.
+[**Resonate docs**](https://docs.resonatehq.io) — how to *use* Resonate, the reference implementation: SDK guides, tutorials, and deployment.

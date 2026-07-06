@@ -115,6 +115,40 @@ function SidebarNode({
   return null;
 }
 
+function flattenFolderPaths(node: PageTree.Node): string[] {
+  if (node.type === "page") return [node.url];
+  if (node.type === "folder") {
+    const paths: string[] = [];
+    if (node.index?.url) paths.push(node.index.url);
+    for (const child of node.children) {
+      paths.push(...flattenFolderPaths(child));
+    }
+    return paths;
+  }
+  return [];
+}
+
+function getTrackNodes(tree: PageTree.Root, currentPath: string): PageTree.Node[] {
+  if (currentPath === "/" || currentPath === "") {
+    return tree.children;
+  }
+  // Try to find a folder whose content URL-space matches currentPath
+  for (const node of tree.children) {
+    if (node.type !== "folder") continue;
+    // Check by index URL prefix (e.g., node.index.url = "/sdk")
+    const prefix = node.index?.url;
+    if (prefix && (currentPath === prefix || currentPath.startsWith(prefix + "/"))) {
+      return node.children;
+    }
+    // Also check children for path prefix match
+    const hasMatch = flattenFolderPaths(node).some(
+      (u) => u === currentPath || currentPath.startsWith(u + "/")
+    );
+    if (hasMatch) return node.children;
+  }
+  return tree.children;
+}
+
 function isAncestor(node: PageTree.Node, path: string): boolean {
   if (node.type === "page") return node.url === path;
   if (node.type === "folder") {
@@ -154,7 +188,7 @@ export default function Sidebar({ tree, currentPath }: SidebarProps) {
         role="navigation"
         aria-label="Documentation"
       >
-        {tree.children.map((node, i) => (
+        {getTrackNodes(tree, currentPath).map((node, i) => (
           <SidebarNode key={`${node.type}-${i}`} node={node} currentPath={currentPath} />
         ))}
       </aside>

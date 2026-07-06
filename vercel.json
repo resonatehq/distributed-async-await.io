@@ -1,3 +1,19 @@
 {
-  "framework": "nextjs"
+  "framework": "nextjs",
+  "redirects": [
+    { "source": "/introduction", "destination": "/sdk/introduction", "permanent": true },
+    { "source": "/protocol-at-a-glance", "destination": "/sdk/protocol-at-a-glance", "permanent": true },
+    { "source": "/talking-to-the-server", "destination": "/sdk/talking-to-the-server", "permanent": true },
+    { "source": "/promise-lifecycle", "destination": "/sdk/promise-lifecycle", "permanent": true },
+    { "source": "/tasks-and-the-worker-loop", "destination": "/sdk/tasks-and-the-worker-loop", "permanent": true },
+    { "source": "/function-registry", "destination": "/sdk/function-registry", "permanent": true },
+    { "source": "/replay-and-determinism", "destination": "/sdk/replay-and-determinism", "permanent": true },
+    { "source": "/suspend-resume-settlement", "destination": "/sdk/suspend-resume-settlement", "permanent": true },
+    { "source": "/coroutines", "destination": "/sdk/coroutines", "permanent": true },
+    { "source": "/time-retries-policies", "destination": "/sdk/time-retries-policies", "permanent": true },
+    { "source": "/encoding-and-codecs", "destination": "/sdk/encoding-and-codecs", "permanent": true },
+    { "source": "/local-mode", "destination": "/sdk/local-mode", "permanent": true },
+    { "source": "/testing-against-the-spec", "destination": "/sdk/testing-against-the-spec", "permanent": true },
+    { "source": "/production-concerns", "destination": "/sdk/production-concerns", "permanent": true }
+  ]
 }

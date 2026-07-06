@@ -119,7 +119,7 @@ export default async function Page({ params }: PageProps) {
         {crumbs.length > 0 && (
           <nav className="text-xs text-bright-gray-500 dark:text-muted mb-6 font-mono" aria-label="Breadcrumb">
             <Link href="/" className="hover:text-bright-gray-900 dark:hover:text-primary transition">
-              Handbook
+              Home
             </Link>
             {crumbs.map((crumb, i) => (
               <span key={i}>
@@ -209,7 +209,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 
   const title = page.data.title;
   const description =
-    page.data.description || `${title} — the Distributed Async Await SDK author's handbook`;
+    page.data.description || `${title} — Distributed Async Await`;
 
   return {
     title,

@@ -53,7 +53,7 @@ const index = files.map((f) => {
 
 writeFileSync(
   join(PUBLIC_DIR, "llms.txt"),
-  `# Distributed Async Await — SDK Author's Handbook\n\n> How to build a Resonate SDK in any language, from the protocol mental model to production concerns.\n\n${index.join("\n")}\n`
+  `# Distributed Async Await — specification, server implementers' guide, and SDK authors' handbook\n\n> The protocol specification, server implementers' guide, and SDK authors' handbook for Distributed Async Await.\n\n${index.join("\n")}\n`
 );
 
 // llms-full.txt — full content concatenated
@@ -68,7 +68,7 @@ const fullContent = files.map((f) => {
 
 writeFileSync(
   join(PUBLIC_DIR, "llms-full.txt"),
-  `# Distributed Async Await — SDK Author's Handbook — Full Content\n\n${fullContent.join("\n\n---\n\n")}\n`
+  `# Distributed Async Await — specification, server implementers' guide, and SDK authors' handbook — Full Content\n\n${fullContent.join("\n\n---\n\n")}\n`
 );
 
 console.log(`Generated llms.txt (${files.length} entries) and llms-full.txt`);

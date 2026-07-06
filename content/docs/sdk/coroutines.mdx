@@ -8,7 +8,7 @@ hideTitle: true
 
 Everything up to here has treated "the durable function" as a thing the worker drives one step at a time — run it until it blocks, suspend, resume, replay. This chapter is about the *thing being driven*: how a developer's function is shaped so that it can be paused at a durable step and resumed later, and how your SDK steps it forward. This is where the host language stops being a backdrop and starts dictating the design, because the mechanism that lets a function pause mid-flight and hand control back to your runtime is the single most language-specific decision in the whole SDK.
 
-[Earlier chapters](/replay-and-determinism) deferred the deep treatment to here, and named the split they were deferring: **TypeScript and Python express a durable function as a sync generator; Rust expresses it as an async future.** Neither is more correct. Each is simply how durable suspension expresses itself naturally in that language's runtime, and your first real design decision is which shape fits the grain of yours.
+[Earlier chapters](/sdk/replay-and-determinism) deferred the deep treatment to here, and named the split they were deferring: **TypeScript and Python express a durable function as a sync generator; Rust expresses it as an async future.** Neither is more correct. Each is simply how durable suspension expresses itself naturally in that language's runtime, and your first real design decision is which shape fits the grain of yours.
 
 ## The same step, two shapes
 
@@ -47,7 +47,7 @@ It is `function*`, not `async function*`. The generator yields synchronously bet
 
 In a generator model your SDK owns a loop that steps the generator, inspects what came out, acts on it, and steps again. The generator is inert between calls; nothing happens until you call `.next()` (TS) or `.send()` (Python).
 
-TypeScript's driver is `Coroutine.exec` (`resonate-sdk-ts/src/coroutine.ts`). It instantiates the generator once and runs a trampoline: each turn calls `.next(input)` on the generator, reads the yielded value, and — depending on whether it is a local invocation, a remote one, or an await on an existing handle — either creates the durable promise and feeds the result back as the next `input`, or, if the awaited promise is still pending, returns a `Suspended` result and lets go (the [suspend/resume](/suspend-resume-settlement) machinery takes it from there). A yielded call is mediated by a `Decorator` (`resonate-sdk-ts/src/decorator.ts`) that translates each `Yieldable` — the union of `LFI`, `LFC`, `RFI`, `RFC`, and a future handle — into an internal instruction the loop acts on.
+TypeScript's driver is `Coroutine.exec` (`resonate-sdk-ts/src/coroutine.ts`). It instantiates the generator once and runs a trampoline: each turn calls `.next(input)` on the generator, reads the yielded value, and — depending on whether it is a local invocation, a remote one, or an await on an existing handle — either creates the durable promise and feeds the result back as the next `input`, or, if the awaited promise is still pending, returns a `Suspended` result and lets go (the [suspend/resume](/sdk/suspend-resume-settlement) machinery takes it from there). A yielded call is mediated by a `Decorator` (`resonate-sdk-ts/src/decorator.ts`) that translates each `Yieldable` — the union of `LFI`, `LFC`, `RFI`, `RFC`, and a future handle — into an internal instruction the loop acts on.
 
 Python's driver is the scheduler (`resonate-sdk-py/resonate/scheduler.py`), which advances each coroutine through `Coroutine.send` (`resonate-sdk-py/resonate/coroutine.py`). The shape of `send` is the whole model in miniature: it is called with `None` on the first step, with `Ok(value)` to feed back a resolved result, or with `Ko(error)` to throw an exception *into* the generator at the yield point — which is how a failed durable step surfaces as an ordinary `try`/`except` in the developer's code. What comes back out is the next thing the generator wants: a local invocation, a remote one, an await handle, or a terminal "I'm done."
 
@@ -63,7 +63,7 @@ So how does an `.await` on an unsettled durable call pause the function without 
 The generator SDKs suspend by *returning a value from the driver loop* (`Suspended`) — the SDK is the iterator, so it just stops iterating. Rust suspends by *propagating an error up the future chain* — the SDK is not the runtime, so it signals out-of-band and lets the runtime unwind. Both re-run the function from the top on resume and rely on replay to fast-path the completed steps. The host-language plumbing is entirely different; the durable-execution contract is identical.
 </Callout>
 
-This is also why the [determinism contract](/replay-and-determinism) lands the same way in every language: re-running from the top only works if the function reaches the same durable steps in the same order, whether those steps are `yield`s the SDK counts or `.await`s the runtime re-drives.
+This is also why the [determinism contract](/sdk/replay-and-determinism) lands the same way in every language: re-running from the top only works if the function reaches the same durable steps in the same order, whether those steps are `yield`s the SDK counts or `.await`s the runtime re-drives.
 
 ## The invocation surface
 
@@ -115,4 +115,4 @@ The mechanism is dictated by the language; the *surface* is your call, and it is
 
 Get this layer right and the whole engine underneath — promises, tasks, replay, suspend/resume — stays invisible to the developer, which was the point from the start.
 
-Next: [time, retries, and policies](/time-retries-policies) — durable sleep, scheduling without a live process, and how (and where) a retry policy rides along with a call.
+Next: [time, retries, and policies](/sdk/time-retries-policies) — durable sleep, scheduling without a live process, and how (and where) a retry policy rides along with a call.

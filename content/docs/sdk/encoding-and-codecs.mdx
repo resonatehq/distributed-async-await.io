@@ -13,7 +13,7 @@ A promise stores a value, but the server has no idea what your developer's value
 Recall the two-field shape a promise's `param` and `value` each carry: `data` and `headers`. The contract is small and worth stating exactly:
 
 - **`data`** is an *encoded string* (or absent). The Rust type says it plainly in its own doc comment: on the wire, `data` is a base64-encoded JSON string; only after the codec decodes it does `data` hold a real value (`Value` in `resonate-sdk-rs/resonate/src/types.rs`). TypeScript's `Value` (`resonate-sdk-ts/src/network/types.ts`) and Python's `DurablePromiseValue` (`resonate-sdk-py/resonate/models/durable_promise.py`, where `data` is typed `str | None`) carry the same idea.
-- **`headers`** is a string→string map that travels *alongside* `data` and tells the codec how to read it — content type, encoding, format markers. This is the forward reference the [promise lifecycle](/promise-lifecycle) chapter left open: headers exist so that decoding doesn't have to guess.
+- **`headers`** is a string→string map that travels *alongside* `data` and tells the codec how to read it — content type, encoding, format markers. This is the forward reference the [promise lifecycle](/sdk/promise-lifecycle) chapter left open: headers exist so that decoding doesn't have to guess.
 
 The codec is the only component that understands the relationship between the two. It encodes a native value into `data` (and, optionally, writes `headers`), and on the way back it reads `headers` to decide how to turn `data` back into a value.
 
@@ -47,7 +47,7 @@ The reason the codec is a named, swappable component and not a hardcoded `JSON.s
 
 ## Encryption: the honest state of it
 
-It is tempting to present encryption as a solved, uniform feature. It is not, and the handbook's habit of [surfacing the hard parts honestly](/introduction) applies — so here is exactly what ships.
+It is tempting to present encryption as a solved, uniform feature. It is not, and the handbook's habit of [surfacing the hard parts honestly](/sdk/introduction) applies — so here is exactly what ships.
 
 **TypeScript and Rust define an encryption seam and ship no cipher.** Each has an `Encryptor` abstraction — a TS `Encryptor` interface (`resonate-sdk-ts/src/encryptor.ts`) and a Rust `Encryptor` trait (`resonate-sdk-rs/resonate/src/codec.rs`) — wired into the codec as an injectable dependency. But the only implementation either ships is a `NoopEncryptor` passthrough. There is no AES, no ChaCha, no key management. Encryption is *possible* in TS and Rust by supplying your own `Encryptor`; it is not *provided*.
 
@@ -72,4 +72,4 @@ Because JSON-then-base64 is the shared default, a value written by one SDK is *g
 
 On **versioning encoded data over time**, the honest answer is that none of the SDKs solves it: there is no schema-version field in `headers`, no forward/backward-compatibility guard, no migration path for old payloads. This is a real gap, and a place your SDK can do better deliberately — reserving a `headers` key for a codec/schema version costs nothing now and is the only inexpensive moment to add it. If you skip it, a value encoded today is a value you can never safely change the shape of, and the first time you try, replay over old promises will hand your decoder bytes it no longer understands.
 
-Next: [local mode for development](/local-mode) — running the whole engine in-process so a developer can build against it with nothing else installed, and the one emulation gap you have to be honest about.
+Next: [local mode for development](/sdk/local-mode) — running the whole engine in-process so a developer can build against it with nothing else installed, and the one emulation gap you have to be honest about.

@@ -21,7 +21,7 @@ type Value = {
 };
 ```
 
-All three reference SDKs model this faithfully — `Value` in `resonate-sdk-ts/src/network/types.ts`, `DurablePromiseValue` in `resonate-sdk-py/resonate/models/durable_promise.py`, `Value` in `resonate-sdk-rs/resonate/src/types.rs`. The `headers` field is easy to skip on a first pass because the simplest examples never use it, and then you discover it is load-bearing: it is where content-type and encoding metadata ride alongside the payload, which is what lets the [codec layer](/encoding-and-codecs) know how to decode `data` on the way back out. Model `headers` from the start; do not bolt it on.
+All three reference SDKs model this faithfully — `Value` in `resonate-sdk-ts/src/network/types.ts`, `DurablePromiseValue` in `resonate-sdk-py/resonate/models/durable_promise.py`, `Value` in `resonate-sdk-rs/resonate/src/types.rs`. The `headers` field is easy to skip on a first pass because the simplest examples never use it, and then you discover it is load-bearing: it is where content-type and encoding metadata ride alongside the payload, which is what lets the [codec layer](/sdk/encoding-and-codecs) know how to decode `data` on the way back out. Model `headers` from the start; do not bolt it on.
 
 The `data` itself is a string — the already-encoded payload. The promise layer does not know or care what is inside it; serialization happens one layer up, before the value reaches the wire. Keep that boundary clean: promises move opaque strings, codecs give them meaning.
 
@@ -101,4 +101,4 @@ TypeScript and Rust use `resonate:timer` for this; the Python SDK uses `resonate
 
 The discipline that ties this chapter together: the server is the source of truth, and your in-memory promise objects are a cache of it. When you create a promise, you hold a `PromiseRecord`, but its authoritative state can change underneath you — it can be resolved by another execution, or timed out by the server, while your copy still says `pending`. Never treat your local record as final. A settlement, a read, or a resumption (chapter 8) is what tells you the real state. Build your promise types as snapshots with a known-as-of quality, not as the truth itself — and let the next chapters, on tasks and the worker loop, show how the server keeps that truth consistent across crashing, restarting workers.
 
-Next: [tasks and the worker loop](/tasks-and-the-worker-loop) — the claim on a promise, and the engine that drives it.
+Next: [tasks and the worker loop](/sdk/tasks-and-the-worker-loop) — the claim on a promise, and the engine that drives it.
