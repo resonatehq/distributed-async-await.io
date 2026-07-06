@@ -1,0 +1,59 @@
+---
+title: Function Executions
+description: The fundamental unit of computation — lifecycle, long-running semantics, and the logical/physical distinction.
+keywords:
+  - execution
+  - logical-execution
+  - physical-execution
+  - long-running
+  - concurrency
+  - distribution
+---
+
+<Callout type="info" title="Fundamental unit of computation">
+Executions are the **fundamental unit of computation** in a system.
+</Callout>
+
+On an execution level, a system is a collection of executions; each execution has a unique identity. An execution has a well-defined lifecycle, represented by the lifecycle events _invoke_ and _return_, that governs its participation in the system:
+
+**_invoke_** marks the initialization of the execution and represents its entry into the system.
+
+**_return_** marks the termination of the execution and represents its exit from the system.
+
+An execution is bound to a single process. An execution cannot emit events outside its (_invoke_, _return_) interval. As a consequence, an execution cannot be restarted. Instead, a new execution must be created that may be considered the logical successor or the logical equivalent of the terminated execution.
+
+![Execution lifecycle diagram](/images/spec/execution-lifecycle.svg)
+
+An execution may raise events such as send or receive events only within its (_invoke_, _return_) interval.
+
+## Long-running executions
+
+The term *long running* is not a well-defined term in the context of distributed systems — "long" is relative.
+
+This system model argues that you should not think about "long" in terms of time. Instead, *long* refers to the potential for a logical execution to span multiple physical locations. An execution is long-running if it potentially runs across multiple processes.
+
+## Physical vs logical
+
+Distributed Async Await makes the distinction between physical executions and logical executions.
+
+One logical execution consists of multiple concurrent and distributed physical executions — physical executions may execute independently and on different resources.
+
+For example, logical execution `le1` starts as physical execution `pe1` on physical process `p1`. Physical process `p1` then experiences a crash failure. Logical execution `le1` is then resumed as physical execution `pe2` on physical process `p2`.
+
+Physical executions never "restart". Each physical execution is distinct. A logical execution can contain many physical executions, each one starting from the beginning and attempting to make progress. The logical execution completes when a physical execution reaches the return statement of the function.
+
+## Concurrency
+
+The defining characteristic of concurrency is non-deterministic *partial order*; to mitigate the challenges of partial order, we leverage **coordination** to ensure consistency.
+
+## Distribution
+
+The defining characteristic of distribution is non-deterministic *partial failure*; to mitigate the challenges of partial failure, we leverage **recovery** to ensure completion.
+
+### Distribution across space
+
+An execution is distributed across space when the same logical execution spans multiple physical executions concurrently — at the same point in time.
+
+### Distribution across time
+
+An execution is distributed across time when the same logical execution spans multiple physical executions sequentially — at different points in time.

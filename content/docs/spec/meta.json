@@ -1,5 +1,11 @@
 {
   "root": true,
   "title": "Specification",
-  "pages": ["index"]
+  "pages": [
+    "index",
+    "programming-model",
+    "execution-model",
+    "system-model",
+    "glossary"
+  ]
 }

@@ -26,7 +26,9 @@ function extractFrontmatter(content) {
   const match = content.match(/^---\n([\s\S]*?)\n---/);
   if (!match) return { title: "", description: "", body: content };
   const fm = match[1];
-  const title = fm.match(/^title:\s*(.+)$/m)?.[1]?.trim() || "";
+  // Prefer pageTitle (the rendered h1) over title (the sidebar label, e.g. "Overview")
+  const pageTitle = fm.match(/^pageTitle:\s*(.+)$/m)?.[1]?.trim() || "";
+  const title = (pageTitle || fm.match(/^title:\s*(.+)$/m)?.[1]?.trim() || "").replace(/^["']|["']$/g, "");
   const description = fm.match(/^description:\s*(.+)$/m)?.[1]?.trim() || "";
   const body = content.slice(match[0].length).trim();
   return { title, description, body };
@@ -44,7 +46,7 @@ const files = walkMdx(CONTENT_DIR).sort();
 
 // llms.txt — index with titles and URLs
 const index = files.map((f) => {
-  const rel = relative(CONTENT_DIR, f).replace(/\.mdx$/, "").replace(/\/index$/, "");
+  const rel = relative(CONTENT_DIR, f).replace(/\.mdx$/, "").replace(/\/index$/, "").replace(/^index$/, "");
   const url = `/${rel}`;
   const content = readFileSync(f, "utf-8");
   const { title, description } = extractFrontmatter(content);
@@ -58,7 +60,7 @@ writeFileSync(
 
 // llms-full.txt — full content concatenated
 const fullContent = files.map((f) => {
-  const rel = relative(CONTENT_DIR, f).replace(/\.mdx$/, "").replace(/\/index$/, "");
+  const rel = relative(CONTENT_DIR, f).replace(/\.mdx$/, "").replace(/\/index$/, "").replace(/^index$/, "");
   const url = `/${rel}`;
   const content = readFileSync(f, "utf-8");
   const { title, body } = extractFrontmatter(content);

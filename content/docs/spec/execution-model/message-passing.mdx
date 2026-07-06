@@ -1,0 +1,189 @@
+---
+title: Message Passing Protocol
+description: The wire-level contract — envelope, status codes, addressing, transport variants — that all Distributed Async Await communication rides on.
+keywords:
+  - message-passing
+  - protocol
+  - envelope
+  - wire-format
+  - addressing
+  - unicast
+  - anycast
+  - reserved-tags
+---
+
+<Callout type="info" title="Communication between components">
+The **Message Passing Protocol** defines how components in Distributed Async Await communicate — the envelope every message uses, the addresses messages are sent to, and the transport variants the protocol rides on.
+</Callout>
+
+The Message Passing Protocol is transport-agnostic. The same envelope flows over HTTP, NATS, Kafka, or an SSE poll connection — only the framing changes. The specification defines minimal requirements and minimal guarantees so a wide array of transports can implement it.
+
+## Message events
+
+Messages are the means by which processes communicate — the primary mechanism for exchanging information and coordinating actions in a distributed system.
+
+Messages are sent between processes; consequently, messages are addressed to processes. One (successful) message exchange consists of a *send event* at the sending process and a *receive event* at the receiving process.
+
+![Send and Receive event diagram](/images/spec/send-receive-event.svg)
+
+The most fine-grained model of message exchange between two processes consists of **four events**: a send event at the sending process, a receive event at the network, followed by a send event at the network and a receive event at the receiving process. At this level of abstraction, message exchange between processes and the network is reliable; the network itself may reorder, drop, or duplicate messages.
+
+The more common model of message exchange between two processes consists of **two events**: a send event at the sending process and a receive event at the receiving process. At this level of abstraction, message exchange between processes is unreliable — messages may be reordered, dropped, or duplicated.
+
+The only guarantee is that if a process experiences a receive event, there is a corresponding send event at a sending process (which may be the same process).
+
+## Send
+
+Every component may issue a `Send(address, message)` command that emits a `Send(address, message)` event.
+
+```text
+command Send<T>(address : Address, message : T)
+```
+
+The Send command is the foundation of Distributed Async Await's failover mechanics: Send's anycast semantics enable both routing and transparent rerouting in case of failure. This allows distributed executions to adapt dynamically to changes in process topology.
+
+### Invoke and Resume — the canonical interaction
+
+The canonical interaction in Distributed Async Await is invoking and awaiting an asynchronous function remotely (see the [Coordination Protocol](/spec/execution-model/coordination-protocol)). It involves two messages:
+
+- **Invoke** — the request to invoke an execution.
+- **Resume** — the request to resume an awaiting execution.
+
+Both are delivered as the on-the-wire envelope described below.
+
+## Wire envelope
+
+All communication uses a uniform request/response envelope. The protocol is transport-agnostic — the envelope is the same regardless of whether the transport is HTTP, NATS, Kafka, or another binding.
+
+### Request
+
+```text
+{
+  kind: string,                  // operation identifier, e.g. "promise.create"
+  head: {
+    corrId: string,              // correlation ID for request/response matching
+    version: string,             // protocol version
+    auth?: string                // optional bearer token
+  },
+  data: { ... }                  // operation-specific payload
+}
+```
+
+### Response
+
+```text
+{
+  kind: string,                  // echoes the request kind
+  head: {
+    corrId: string,              // echoes the request correlation ID
+    status: integer,             // status code (see below)
+    version: string              // protocol version
+  },
+  data: { ... }                  // operation-specific payload, or error string on failure
+}
+```
+
+The `corrId` is echoed unchanged in the response so a client multiplexing multiple in-flight requests over a single connection can pair each response to its request. The `version` field carries the protocol version the request is built against; the server may reject unsupported versions with `400`.
+
+On error (status `>= 400`), the response `data` is a string describing the error.
+
+### Status codes
+
+| Code | Meaning |
+|------|---------|
+| 200 | Success |
+| 300 | Continue — for `task.suspend`, an awaited promise has already settled; the worker should resume immediately without suspending |
+| 400 | Bad request (validation error or unsupported protocol version) |
+| 401 | Unauthorized (missing or invalid auth token) |
+| 403 | Forbidden (valid token but insufficient access) |
+| 404 | Not found |
+| 409 | Conflict (version mismatch, invalid state transition, or fence check failed) |
+| 422 | Unprocessable entity (e.g., awaiter not found, missing required tag) |
+| 429 | Too many requests (rate limited) |
+| 500 | Internal server error |
+| 501 | Not implemented |
+
+## Reserved tags
+
+Promises carry a `tags` map. The protocol reserves the `resonate:` namespace for tags that drive routing, scheduling, and the execution tree.
+
+| Tag | Effect |
+|-----|--------|
+| `resonate:target` | Delivery address for execute messages. Triggers task creation on `promise.create`. |
+| `resonate:timer` | When `"true"`, timeout transitions to `resolved` instead of `rejected_timedout`. |
+| `resonate:origin` | Identifies the root promise that initiated the execution. All promises in an execution tree share the same `resonate:origin` value. |
+| `resonate:parent` | Identifies the direct parent promise in the execution tree. |
+| `resonate:branch` | Identifies the current execution branch. Set when a promise in an execution tree has a `resonate:target` tag. Drives preload semantics. |
+| `resonate:delay` | When present on a `promise.create` request that also carries a `resonate:target` tag, the server parses the value as a timestamp (natural number). If the delay value is greater than `now`, the server arms the task's retry timeout at `delay` rather than emitting an immediate `execute` message, effectively scheduling the execution for a future time. |
+
+User-defined tags outside the `resonate:` namespace are opaque to the protocol and may be used freely.
+
+## Addressing
+
+An **address** is a URI that determines which transport to use, where to deliver the message, and the delivery semantics. Addresses appear on the `resonate:target` tag of a promise (for execute messages) and on listener registrations (for unblock messages).
+
+### Address format
+
+```text
+scheme[+connection]://[cast@]host[:port][/path][?query]
+```
+
+The scheme selects the transport. The optional `+connection` suffix selects a named connection for that transport — when absent, the transport uses the connection named `default`.
+
+The remainder of the URI is transport-specific.
+
+### Address schemes
+
+| Scheme | Transport | Description |
+|---|---|---|
+| `http://`, `https://` | HTTP | Deliver via HTTP POST to the given URL |
+| `poll://` | Poll | Deliver via Server-Sent Events to a connected poll client |
+| `nats://` | NATS | Deliver via NATS publish to a derived subject |
+| `kafka://` | Kafka | Deliver via Kafka produce to the given topic |
+
+HTTP is the required transport. Every conformant implementation must support `http://` for both receive and send.
+
+### Poll address
+
+```text
+poll://cast@group[/id]
+```
+
+| Component | Required | Description |
+|---|---|---|
+| `cast` | Yes | Delivery mode: `uni` (unicast) or `any` (anycast) |
+| `group` | Yes | Logical group name that workers register under |
+| `id` | No | Specific worker id within the group |
+
+The poll transport does not push messages over the network. Workers connect to the server via HTTP GET and receive messages as Server-Sent Events; the server holds the connection open and writes messages as `data: {json}\n\n` frames.
+
+Examples:
+
+- `poll://any@workers` — deliver to any one connected worker in the `workers` group
+- `poll://uni@workers/worker-1` — deliver only to the worker with id `worker-1`
+- `poll://any@my-service/abc123` — prefer worker `abc123`, fall back to any worker in `my-service` (sticky routing with fallback)
+
+## Delivery semantics
+
+The delivery semantics of `Send` depend on the transport and the address.
+
+| Mode | Definition |
+|---|---|
+| **Unicast** | The message is delivered to exactly one specific worker. If that worker is not available, delivery fails (the message remains in the outbox for retry). |
+| **Anycast** | The message is delivered to exactly one worker from a group. The server selects the recipient. If a preferred worker is specified and available, the server picks it; otherwise, a random worker in the group. |
+| **Broadcast** | The message is delivered to all workers listening on the address. Each worker receives a copy. |
+
+### Per-transport delivery
+
+| Transport | Recv | Send | Delivery model |
+|---|---|---|---|
+| HTTP | yes | yes | Point-to-point — one URL, one endpoint |
+| Poll | no | yes | Unicast (`uni@`) or anycast (`any@`) by address |
+| NATS | yes | yes | Queue-group subscription = unicast; plain subscription = broadcast |
+| Kafka | yes | yes | Kafka consumer-group semantics |
+
+Poll is a `send`-only transport — workers receive messages over SSE, but the requests they originate still ride a `recv`-capable transport (typically HTTP POST).
+
+## Address resolution
+
+This specification does not determine *how* and *when* addresses are resolved. Specifically, it does not determine whether addresses are resolved on send (early binding) or on recv (late binding). Conformant implementations may choose either model.
