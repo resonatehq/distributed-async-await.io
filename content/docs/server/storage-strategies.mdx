@@ -1,0 +1,211 @@
+---
+title: "Storage strategies"
+pageTitle: "Storage strategies: backing a DAA server"
+description: "The substrate requirements every DAA server storage layer must meet, with three worked case studies: relational SQL, wide-column NoSQL, and a message-broker KV store."
+hideTitle: true
+---
+
+# Storage strategies: backing a DAA server
+
+The [abstract machine](/server/abstract-machine) defines what a server must do. This chapter is about what you must give it to stand on. Every DAA server stores the same objects — promises, tasks, schedules, callbacks, listeners, outbox messages — and every mutating handler touches them with the same four requirements. Get those requirements right and the mapping to your storage technology is a detail. Get any of them wrong and the machine's safety guarantees evaporate.
+
+## Drop-in vs. not drop-in — read this first
+
+The three public implementations are introduced, with maturity and license labels, in the [track overview](/server) — the fact that matters for this chapter: the reference server and `resonate-on-scylladb` speak the same HTTP/JSON envelope (existing SDKs point at either unchanged), while `resonate-on-nats` speaks NATS pub/sub instead of HTTP and is **not** a drop-in. State that kind of asymmetry clearly in your own implementation's documentation before your users discover it under load.
+
+## What your storage must give you
+
+Four requirements follow directly from the machine.
+
+### 1. Durability before acknowledgment
+
+A handler that returns `200` or `201` has committed. If the process dies the instant after that response leaves the wire, the committed state must survive and be visible to the next request. This rules out in-memory-only stores for any production path — ephemeral state is only safe for testing, and even then your test harness must account for it.
+
+### 2. Atomic compare-and-swap for task mutations
+
+Task mutations — acquire, release, fulfill, suspend — all carry a `version` (fencing token). The version advances only on each fresh `task.acquire`; every subsequent mutation must be gated on the version the worker believes is current. A mutation that presents a stale version must fail without committing.
+
+This is the entire mechanism that prevents two workers from simultaneously driving the same execution. Your storage must expose either:
+
+- **Row-level transactions with a conditional update** (`UPDATE ... WHERE version = $expected`), or
+- **A native CAS primitive** that fails atomically if the expected revision does not match.
+
+A `SELECT` followed by an application-level check followed by an `UPDATE` does not satisfy this requirement. The gap between the read and the write is a window for a concurrent acquire to slip through.
+
+### 3. Multi-record atomicity for handler effects
+
+Many handlers touch more than one row. The most load-bearing case is `task.fulfill`, which must settle the corresponding promise and complete the task — and must do both or neither. A crash between the two writes leaves the machine in a state it cannot recover from on its own.
+
+The same requirement applies to settlement scrub (processing callbacks and listeners when a promise settles) and to the transactional outbox: outbox messages written in the same transaction as the state change they describe, so no state change is ever committed without a corresponding message — and no message is ever committed without a corresponding state change. See [Outbox and delivery](/server/outbox-and-delivery) for the full delivery contract.
+
+### 4. Efficient timeout scans
+
+The machine is full of deadlines: promise `timeout_at`, task retry timeouts, task lease expirations, schedule fire times. Your background worker needs to find expired entries cheaply and process them in order. If your timeout scan is a full table scan it will eventually become your bottleneck.
+
+A time-ordered index on `timeout_at` is the minimum. Wide-column stores without secondary indexes solve this with bucket-partitioned time tables; that pattern trades query flexibility for predictable scan cost.
+
+---
+
+## Case study 1: Relational SQL — how the reference server does it
+
+The reference server (`resonatehq/resonate`, Rust, Apache-2.0) defines all storage operations behind a single `Db` trait (`src/persistence/mod.rs`). The enum `Storage` wraps three backends — `Sqlite`, `Postgres`, `Mysql` — and exposes two entry points to handlers:
+
+```text
+Storage::transact(f)  // wraps f in a transaction; for all mutating handlers
+Storage::query(f)     // read-only; no transaction overhead
+```
+
+Every mutating handler calls `transact`. The closure receives a `&dyn Db` reference and makes all its reads and writes through it. The database transaction commits when the closure returns `Ok`; it rolls back on any error. Handlers never commit partial state.
+
+### Schema shape
+
+The SQLite backend (`src/persistence/persistence_sqlite.rs`) reveals the full object model. Tables of interest:
+
+```text
+promises          — id, state, param_*, value_*, tags, timeout_at, created_at, settled_at
+tasks             — id (FK → promises.id), state, version
+promise_timeouts  — timeout_at (indexed ASC), id
+task_timeouts     — timeout_at (indexed ASC), id, timeout_type, process_id, ttl
+callbacks         — awaited_id, awaiter_id, ready
+listeners         — promise_id, address
+outgoing_execute  — id, version, address
+outgoing_unblock  — promise_id, address
+schedules         — id, cron, promise_id, promise_timeout, …
+schedule_timeouts — timeout_at (indexed ASC), id
+```
+
+Tasks and promises share the same primary key — a task is an extension of its promise, not a separate entity. The `tasks.version` column is the fencing token, used in two distinct patterns. Acquire transitions (`task.acquire`, and `task.create`'s re-acquire branch) are the only mutations that increment it: `UPDATE tasks SET state = 'acquired', version = version + 1, pid = ?, ttl = ? WHERE id = ? AND version = ?`. Every other version-fenced mutation (`fence`, `suspend`, `fulfill`, `release`) checks without bumping: `UPDATE tasks SET state = ?, … WHERE id = ? AND version = ?`. Either way, stale version → no rows updated → the handler returns `409`.
+
+SQLite runs with WAL mode, `busy_timeout = 5000`, and `foreign_keys = ON`. WAL allows concurrent readers while a writer holds the lock; `busy_timeout` absorbs transient write contention without an immediate error.
+
+### The outbox
+
+`outgoing_execute` and `outgoing_unblock` are the outbox tables. The reference server drains them with `take_outgoing`, which issues `DELETE ... RETURNING` — it claims and removes a batch in one statement, so there is no window where a message is "claimed" but not yet removed. Delivery is at-most-once from the storage side; the server retries from the transport side on failure. See [Outbox and delivery](/server/outbox-and-delivery).
+
+### Serialization errors
+
+Postgres (and MySQL) can return serialization errors (`SQLSTATE 40001`) or deadlock errors (`40P01`) on concurrent transactions. The `From<sqlx::Error>` implementation converts these to `StorageError::Serialization` — documented in `persistence/mod.rs` as "retries exhausted, nothing was committed." Note: the handler layer currently surfaces this as a generic `500`; a distinct retriable `503` is the documented design intent but is not yet implemented in `server.rs`. SQLite avoids this category with its single-writer model.
+
+<Callout type="caution" title="MySQL's VARCHAR(255) limit">
+The MySQL backend maps storage-level constraint violations (oversized field values against `VARCHAR(255)` columns) to `StorageError::InvalidInput`, which becomes `400`. If you are implementing a MySQL backend, size constraints are a real sharp edge: a client that sends a promise id longer than 255 bytes will receive `400`, not `500`. Test this path explicitly.
+</Callout>
+
+---
+
+## Case study 2: Wide-column NoSQL — resonate-on-scylladb
+
+`resonatehq/resonate-on-scylladb` is a complete Go reimplementation of the server protocol backed by ScyllaDB. It speaks the same HTTP/JSON envelope as the reference server, so existing SDKs connect to it with no changes.
+
+The schema collapses promises and tasks into a single wide row (`internal/dbms/schema.cql`):
+
+```text
+promises (PRIMARY KEY (origin, id))
+  — state, param_*, value_*, tags, timeout_at, created_at, settled_at
+  — task_state, task_version, task_ttl, task_pid, task_resumes
+  — task_timeout_retry, task_timeout_lease
+  — callbacks (SET<TEXT>), listeners (SET<TEXT>)
+```
+
+Co-locating task and promise in the same row has a direct payoff: a `task.fulfill` that settles the promise and completes the task is a single-row write. There is no multi-table transaction to coordinate, and no partial-commit window.
+
+### CAS via Lightweight Transactions
+
+ScyllaDB does not support multi-row ACID transactions. Instead it offers Lightweight Transactions (LWT) — Paxos-based CAS on a single partition. The server uses this for every conditional operation.
+
+`task.create` for a fresh promise issues:
+
+```cql
+INSERT INTO promises (id, origin, …, task_state, task_version, …)
+VALUES (…)
+IF NOT EXISTS
+```
+
+`task.create` for a re-acquire on an existing pending task issues an `UPDATE ... IF task_state = 'pending'` conditional. If the condition fails the LWT returns `applied = false` and the handler returns `409` to the client — the same semantics the reference server achieves with a conditional SQL update inside a transaction.
+
+The `IF NOT EXISTS` / `IF <condition>` idiom is the CAS primitive. It is atomic within a single partition (one `origin + id` pair). Multi-partition atomicity is not available; the schema is designed so that each handler's critical path fits within one partition.
+
+### Timeout tables
+
+ScyllaDB lacks efficient secondary indexes across arbitrary partition keys, so timeouts use dedicated time-bucket tables:
+
+```text
+promise_timeouts  (PRIMARY KEY ((bucket, shard), timeout_at, origin, promise_id))
+task_timeouts     (PRIMARY KEY ((bucket, shard), timeout_at, timeout_type, origin, task_id))
+schedule_timeouts (PRIMARY KEY ((bucket, shard), timeout_at, origin, schedule_id, create_token))
+```
+
+`bucket` is derived from `timeout_at` by rounding to a configurable width (default `1h`). A background worker scans forward from `now - lookback` across the current and near-future buckets. This gives O(expired entries in window) scan cost rather than O(total rows).
+
+Because ScyllaDB has no transactions spanning the timeout entry and the main promise row, `task.create` pre-inserts the timeout rows *before* the LWT on the main row. If the LWT fails, the server rolls back the orphaned timeout entries. This is a visible pattern in the source (`handler_task.go`, step 2a/2b): pre-insert → LWT → on conflict, clean up orphans.
+
+---
+
+## Case study 3: Message broker — resonate-on-nats
+
+`resonatehq/resonate-on-nats` is a Go reimplementation backed by NATS JetStream KV. It is a **different transport model** from the two cases above: SDKs communicate via NATS subjects, not HTTP. Existing HTTP-based SDKs cannot use it without a NATS-aware client. This is the not-drop-in server.
+
+### State layout: one KV entry per origin
+
+The server partitions state by `origin` — the `resonate:origin` tag value on a promise. All promises, tasks, schedules, callbacks, listeners, and outbox messages for a given origin are serialized into a single JSON blob and stored under one JetStream KV key. A server instance subscribes to a subset of origins (partitions) and processes messages for those origins serially.
+
+```text
+KV key:   base64url(origin)
+KV value: { promises: {…}, tasks: {…}, schedules: {…},
+             callbacks: {…}, listeners: {…},
+             messages: […], timeouts: […] }
+```
+
+Outbox messages sit inside the same blob as the state they describe. Writing the blob commits both simultaneously — no separate outbox table, no partial-commit risk.
+
+### Optimistic CAS via JetStream revision
+
+JetStream KV exposes a per-key revision counter. The server uses it as a CAS token:
+
+```go
+// Create (revision 0 → key does not yet exist)
+newRev, err = kv.Create(ctx, kvKey(origin), data)
+
+// Update (must present current revision)
+newRev, err = kv.Update(ctx, kvKey(origin), data, revision)
+
+// Both return ErrKeyExists / ErrKeyWrongLastSequence on a lost race → ErrCASConflict
+```
+
+On `ErrCASConflict` the server retries: reload state from KV, replay the handler logic, attempt the write again. This is optimistic concurrency — reads are never locked, writes win or retry. Serial-per-origin processing makes conflicts rare in practice (one actor per origin at a time), but the retry path must be correct because concurrent instances can race on the same origin during failover.
+
+This CAS is origin-scoped, not row-scoped. Every write to *any* promise or task within an origin touches the same KV key. That is the tradeoff: no multi-record coordination problem (the whole origin atomically), but contention within a hot origin hits a single CAS bottleneck.
+
+---
+
+## Building a new substrate: what you need
+
+If you are implementing storage from scratch, verify each of the following before considering your layer complete:
+
+1. **Durability** — writes acknowledged to the handler are visible after a process crash and restart. Test by killing the process mid-write and reading back.
+
+2. **Version-fenced task mutations** — `task.acquire`, `task.fulfill`, `task.release`, `task.suspend` must all fail with an observable conflict signal (return value, error code, or exception) when the presented version is not the current version. No read-then-write gap.
+
+3. **Idempotent creates** — `promise.create` and `task.create` must be safe to call twice with the same id. The second call must return the existing record (with a `was_created = false` or equivalent signal), not an error and not a duplicate row.
+
+4. **Atomic scrub + outbox** — settling a promise, processing its callbacks and listeners, and writing the resulting outbox messages must all commit or all fail. A settlement with no outbox entry produces a lost notification. An outbox entry with no settlement produces a phantom notify.
+
+5. **Timeout scan** — you must be able to find all promises, tasks, and schedules whose `timeout_at <= now` without scanning the full dataset. A time-ordered index or a bucket-partitioned time table both work.
+
+6. **Serialization error propagation** — on a lost CAS or a transaction conflict, fail the whole handler with nothing committed and surface a retriable error to the caller — never a silent empty response, and never a success. Neither the Lean model nor the reference server defines a distinct retriable status today (the reference server surfaces these as `500`; a distinct `503` is its documented design intent) — what matters is that your error is distinguishable and the caller can safely retry. See [the status-code table](/server/envelope-and-transport).
+
+<Callout type="info" title="Timeout scan and multi-record atomicity are the two that bite first">
+Developers who implement storage in layers typically get durability and idempotent creates right early on. The first real pain arrives when a timeout scan starts reading the full table at scale, and the second arrives when a promise settlement commits without writing its callback notifications. Build both correctly from the start rather than retrofitting them.
+</Callout>
+
+Once your storage layer passes basic handler tests, the conformance question becomes: does your server behave identically to the reference server across the full operation space — including corner cases like born-expired promises, concurrent acquires, and lease-lapsed re-claims? See [Testing and conformance](/server/testing-and-conformance) for how to structure that verification.
+
+### Related chapters
+
+- [Abstract machine](/server/abstract-machine) — the state transitions your storage must durably record
+- [Outbox and delivery](/server/outbox-and-delivery) — the full transactional outbox contract and delivery semantics
+- [Envelope and transport](/server/envelope-and-transport) — how the HTTP/JSON envelope maps to storage reads and writes
+- [Testing and conformance](/server/testing-and-conformance) — how to know your storage layer got it right
+
+---
+
+*Verified against [resonate-specification`@83d64c3`](https://github.com/resonatehq/resonate-specification/tree/83d64c3). Reference server source verified against `resonatehq/resonate` `@c8d7c7b`. ScyllaDB and NATS implementations verified from public repository READMEs, CQL schema, and Go source (`internal/dbms/schema.cql`, `internal/core/handler_task.go`, `internal/store.go`) fetched via GitHub API.*

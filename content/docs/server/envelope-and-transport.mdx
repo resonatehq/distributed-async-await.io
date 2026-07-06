@@ -1,0 +1,187 @@
+---
+title: "Envelope and transport"
+pageTitle: "The request/response envelope and transport"
+description: "The JSON envelope every handler reads and writes, the status-code vocabulary, and how the reference server binds the protocol to HTTP — separating spec requirement from reference convention."
+hideTitle: true
+---
+
+# The request/response envelope and transport
+
+Every operation your server handles — `promise.create`, `task.acquire`, `task.suspend`, all of them — arrives inside the same JSON envelope and leaves inside a matching response envelope. Get this layer right once and every handler composes on top of it cleanly. Get it wrong and the status codes become meaningless noise.
+
+## What the Lean spec defines — and what it doesn't
+
+<Callout type="caution" title="The wire encoding is not in the Lean model">
+The [Lean specification](https://github.com/resonatehq/resonate-specification) defines the abstract state machine: per-handler `Req` and `Res` types in [`spec/01-objects/types.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/01-objects/types.lean), handler semantics in `spec/02-actions/`. It does **not** specify how those types are encoded on the wire — the concrete JSON field names, the header shape, or the protocol-version string. Those are defined by the reference server. The next two sections describe the reference server's choices and label them as such. If you deviate, your server is not wrong by the Lean model, but SDK clients that speak the reference protocol will fail against it.
+</Callout>
+
+The Lean types are still your ground truth for handler semantics. Every `status` value in every `Res` type in `types.lean` — and every transition in the `02-actions/` files — is what your handlers must implement. The wire encoding just carries those semantics to the client.
+
+## Envelope shape
+
+*The following field names and structure match the reference server's `RequestEnvelope` / `ResponseEnvelope` types in `src/types.rs`.*
+
+### Request
+
+```json
+{
+  "kind": "promise.create",
+  "head": {
+    "corrId": "abc-123",
+    "version": "2026-04-01",
+    "auth": null
+  },
+  "data": { ... }
+}
+```
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `kind` | string | Operation name. Routes to the handler. Must be non-empty. |
+| `head.corrId` | string | Client-chosen correlation ID. Echoed back unchanged in the response. Use it to match async responses. |
+| `head.version` | string | Protocol version. The only accepted value today is `"2026-04-01"`. A mismatch produces `400`. |
+| `head.auth` | string \| null | Optional bearer token. Ignored when auth is not configured. |
+| `data` | object | Handler-specific payload. Must be a JSON object (not an array or scalar). |
+
+### Response
+
+```json
+{
+  "kind": "promise.create",
+  "head": {
+    "corrId": "abc-123",
+    "status": 200,
+    "version": "2026-04-01"
+  },
+  "data": { ... }
+}
+```
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `kind` | string | Echo of `req.kind`. Always present, even on error. |
+| `head.corrId` | string | Echo of `req.head.corrId`. |
+| `head.status` | integer | Protocol status code (not HTTP status). See the table below. |
+| `head.version` | string | Always `"2026-04-01"` in the current reference server. |
+| `data` | any | On success: typed handler response object. On error: a string error message. |
+
+## HTTP transport
+
+The Lean machine models no transport at all — but the prose specification does: [the message-passing protocol](/spec/execution-model/message-passing#address-schemes) names HTTP as the required transport, which every conformant implementation must support for both send and receive (other schemes are optional). The concrete binding below — routes, headers, JSON shape — is the reference server's. The reference server exposes a single route:
+
+```
+POST /
+Content-Type: application/json
+```
+
+All operations use this one endpoint. There are no per-resource URLs, no query parameters, no path segments that carry operation semantics. The `kind` field in the envelope is the entire routing key.
+
+The HTTP response status mirrors `head.status`. A `200 OK` from the HTTP layer means the envelope parsed and the handler ran; whether the operation itself succeeded is in `head.status`. (They will agree for success, and they agree for client errors — a `400` in the head is a `400 HTTP` — but the important thing is `head.status` is always authoritative.)
+
+Other transport bindings (WebSocket, message queue, in-process channel) are not prohibited, but none are specified. The reference server implements HTTP only.
+
+<Callout type="note" title="Legacy REST endpoints are gone">
+Earlier versions of the server exposed per-resource REST routes (`/promises`, `/tasks`, `/schedules`). The reference server returns `410 Gone` on those paths. Any client still using them needs updating before it will work against a conformant server.
+</Callout>
+
+## A concrete example: promise.create
+
+`promise.create` is the simplest handler to study because it always returns `200` — there is no 404 (idempotent: a re-create returns the existing promise), no 409, and no other success code. Every branch in [`spec/02-actions/P-02-promise.create.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/P-02-promise.create.lean) ends with `status := 200`.
+
+**Request:**
+
+```json
+{
+  "kind": "promise.create",
+  "head": {
+    "corrId": "c7f2a0b9",
+    "version": "2026-04-01"
+  },
+  "data": {
+    "id": "payments.charge.txn-42",
+    "timeoutAt": 1800000,
+    "param": {
+      "headers": { "content-type": "application/json" },
+      "data": "{\"amount\": 100}"
+    },
+    "tags": {
+      "resonate:target": "poll://any@workers"
+    }
+  }
+}
+```
+
+**Response:**
+
+```json
+{
+  "kind": "promise.create",
+  "head": {
+    "corrId": "c7f2a0b9",
+    "status": 200,
+    "version": "2026-04-01"
+  },
+  "data": {
+    "promise": {
+      "id": "payments.charge.txn-42",
+      "state": "pending",
+      "param": {
+        "headers": { "content-type": "application/json" },
+        "data": "{\"amount\": 100}"
+      },
+      "value": {},
+      "tags": { "resonate:target": "poll://any@workers" },
+      "timeoutAt": 1800000,
+      "createdAt": 1720300000000,
+      "settledAt": null
+    }
+  }
+}
+```
+
+Field-by-field notes:
+- `data.id` — Promise identifier. The same string echoed back in `promise.id`. Dot-separated segments encode the call tree; the prefix is the origin.
+- `data.timeoutAt` — Epoch milliseconds. If this timestamp is already in the past at create time, the promise is born `rejected_timedout` (or `resolved`, for timer promises with `resonate:timer: "true"`).
+- `data.param` — Arbitrary input payload: optional `headers` map and optional `data` string. The server stores and returns it verbatim.
+- `data.tags` — Key/value pairs with semantic meaning. `resonate:target` is the delivery address for the execute message the server sends to a worker. Valid schemes: `http://`, `https://`, `poll://cast@group[/id]`, `gcps://project/topic`, `bash://`. A promise without `resonate:target` has no associated task and delivers no message.
+- `promise.createdAt` — Set by the server. Do not trust the client to supply it.
+- `promise.settledAt` — `null` until the promise reaches a terminal state; then epoch milliseconds of settlement.
+
+## Status code vocabulary
+
+These codes appear in `head.status` on every response. They are protocol-level codes, not HTTP status codes, though the reference server maps them to matching HTTP statuses.
+
+| Code | Meaning | Which handlers |
+|------|---------|----------------|
+| `200` | Success. `data` is the typed response object. | All handlers on success. |
+| `300` | Immediate resume. At least one awaited promise is already settled or expired — nothing is registered, the task stays `acquired`, and the client must handle the awakenings in-band. | `task.suspend` only. |
+| `400` | Bad request. Envelope malformed, `kind` unknown or empty, `data` not an object, `version` not accepted, or field-level validation failure. | All handlers. |
+| `403` | Forbidden. Debug operations are disabled on this server. | `debug.*` handlers only. |
+| `404` | Not found. The addressed resource does not exist. | `promise.get`, `promise.settle`, `promise.register_callback`, `promise.register_listener`, `task.get`, `task.acquire`, `task.release`, `task.fulfill`, `task.suspend`, `task.fence`, `task.halt`, `task.continue`, `schedule.get`, `schedule.delete`. Not `task.create` — its existing-promise branch answers `409`/`422`, never `404`. |
+| `409` | Conflict. The operation is semantically valid but cannot proceed: wrong task state, version mismatch, or the resource already exists in an incompatible form. | `task.create`, `task.acquire`, `task.release`, `task.fulfill`, `task.suspend`, `task.fence`, `task.halt`, `task.continue`. |
+| `422` | Unprocessable. The request is structurally valid but violates a semantic constraint — for example, an awaiter promise that has no `resonate:target` tag, an awaited promise that does not exist during suspension, or a `task.create` where the promise exists but carries no target. | `promise.register_callback`, `task.create`, `task.suspend`. |
+| `500` | Internal error. Storage failure or unexpected condition. | All handlers (as a catch-all). |
+| `501` | Not implemented. | See below. |
+| `503` | Retriable storage contention (nothing committed). Documented reference-server design intent for serialization failures — not in the Lean model, and **not yet emitted**: the current reference server surfaces these as `500`. | None today. See [storage strategies](/server/storage-strategies). |
+
+### Notes on the surprising codes
+
+**`300` is only ever from `task.suspend`.** No other handler returns it. It signals that at least one awaited promise is already settled or expired, so the server registered nothing and skipped parking the task — the awaited work is already done and the worker still holds the claim. The Lean spec defines this path explicitly: [`spec/02-actions/T-06-task.suspend.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/T-06-task.suspend.lean) line 27, when any awaited promise is `!= .pending` or past its `timeoutAt`. Do not confuse this with an error. The worker should re-run as if it received a resume message. See [state model](/server/state-model) for the full task lifecycle.
+
+**`promise.create` is 200-only.** Every branch in the Lean spec returns `status := 200`. A re-create of an existing promise returns the existing record — idempotent, still 200. There is no 409 or 404 from this handler.
+
+**`501` and the search handlers.** The Lean spec marks all three search operations as unimplemented: [`P-06-promise.search.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/P-06-promise.search.lean), [`T-11-task.search.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/T-11-task.search.lean), and [`S-04-schedule.search.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/S-04-schedule.search.lean) each contain only `return { status := 501 }`. The reference server implements all three and returns `200` with paginated results. This is a real divergence: the Lean model says search is not part of the spec; the reference server ships it. A minimally conformant server must handle the 501 cases (so clients don't crash on unknown status codes), but search implementation is not a spec requirement. If you implement it, match the reference server's pagination shape (`cursor`-based, max 1000 per page).
+
+**`409` vs `422` — which is which.** The split is not arbitrary: `409` means "your operation is valid but the current state won't allow it" (a worker presenting a stale version is the canonical case); `422` means "you referenced something in a way the server can't satisfy" (an awaited promise that doesn't exist, an awaiter that has no target). In practice: if you see a 409 from `task.acquire`, stop — you've been outrun. If you see a 422 from `task.suspend`, the promise ID you passed doesn't exist on this server.
+
+## Cross-references
+
+The message-level delivery contract — execute and unblock message structure, address schemes, anycast vs unicast delivery semantics — is specified in [Message Passing Protocol](/spec/execution-model/message-passing). That page covers what the server sends *to* workers; this chapter covers what workers send *to* the server.
+
+For how status codes map to task and promise state transitions, see [State Model](/server/state-model).
+
+For the surface the spec deliberately leaves open (search semantics, auth, concurrent transport bindings), see [Unspecified Surface](/server/unspecified-surface).
+
+---
+
+*Verified against [resonate-specification`@83d64c3`](https://github.com/resonatehq/resonate-specification/tree/83d64c3) and reference server [`c8d7c7b`](https://github.com/resonatehq/resonate/tree/c8d7c7b).*

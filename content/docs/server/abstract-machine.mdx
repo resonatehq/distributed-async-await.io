@@ -1,0 +1,141 @@
+---
+title: "The abstract machine"
+pageTitle: "The abstract machine: ServerState, effects, and handlers"
+description: "How the Lean 4 spec defines the server as a deterministic state machine — ServerState, atomic effects, and pure handler functions — and why that shape is the right foundation for an implementer."
+hideTitle: true
+---
+
+# The abstract machine: ServerState, effects, and handlers
+
+The normative specification for a conformant DAA server is not a document — it is a running Lean 4 program: [`resonatehq/resonate-specification`](https://github.com/resonatehq/resonate-specification). Everything in this track is anchored on that code. This chapter explains the machine's shape so you can read the source directly and trust what it says.
+
+## The state
+
+The machine holds one value:
+
+```lean
+structure ServerState where
+  config           : ServerConfig
+  promises         : List PromiseObject
+  tasks            : List TaskObject
+  schedules        : List Schedule
+  promiseTimeouts  : List PromiseTimeout
+  taskTimeouts     : List TaskTimeout
+  scheduleTimeouts : List ScheduleTimeout
+  outbox           : List OutboxEntry
+```
+
+That's it. Every object the server knows about lives in one of those eight fields. There is no connection pool, no clock, no filesystem reference. `ServerState` is a plain inductive value; two states are equal iff their fields are equal. This makes the spec executable as a pure function and mechanically comparable against any implementation you build.
+
+`ServerConfig` carries one field today: `retryTimeout : Nat := 5000` (milliseconds). Everything else — auth, transport, indexes — is outside the machine.
+
+## The monad
+
+The machine's computation type is:
+
+```lean
+abbrev M := StateM ServerState
+```
+
+`StateM ServerState` threads a `ServerState` through every operation without any IO. A handler runs; the state may change; the handler returns a result and the new state. Nothing else can happen inside `M`. This is the source of determinism.
+
+## Effects: the only way to touch state
+
+Handlers do not reach into `ServerState` directly. They use a fixed set of named effects defined alongside the state in [`spec/01-objects/state.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/01-objects/state.lean):
+
+| Component | Effects |
+|---|---|
+| promises | `getPromise` / `setPromise` |
+| tasks | `getTask` / `setTask` |
+| schedules | `getSchedule` / `setSchedule` / `delSchedule` |
+| timeouts | `setPromiseTimeout` / `delPromiseTimeout` |
+| | `setTaskTimeout` / `delTaskTimeout` |
+| | `setScheduleTimeout` / `delScheduleTimeout` |
+| outbox | `setMessage` |
+
+Each effect is a small `M` action — a keyed lookup, upsert, or delete on one list. They compose. A handler is a sequence of effect calls. When you implement a storage backend, you are implementing these eight families. Get them right and every handler composes on top for free.
+
+One narrow exception: the settlement scrub — removing a newly-settled promise's id from every pending promise's callbacks list — is inlined at all three settlement sites rather than factored into a named effect. Watch for it; it is not a separate call.
+
+## Handlers: pure functions from request to result
+
+Every protocol handler has the same signature:
+
+```lean
+Req → (now : Nat) → M Res
+```
+
+`now` is the only way time enters the machine. No handler calls a clock. No handler reads an environment variable. Given the same `ServerState`, the same request, and the same `now`, a handler always produces the same `Res` and the same next `ServerState`. This is the totality property: every input produces exactly one output, no exceptions, no panics, no "it depends."
+
+The `taskAcquire` handler is a clean example. It checks state, checks version, transitions the task, arms a lease timeout, and returns:
+
+```lean
+def taskAcquire (req : TaskAcquireReq) (now : Nat) : M TaskAcquireRes := do
+  match ← getTask req.id with
+  | none => return { status := 404 }
+  | some t =>
+  ...
+  let t := { t with state := .acquired, version := t.version + 1,
+                    ttl := some req.ttl, pid := some req.pid, resumes := [] }
+  setTask t
+  delTaskTimeout t.id
+  setTaskTimeout t.id 1 (now + req.ttl)
+  return { status := 200, task := some t.toRecord, ... }
+```
+
+No surprises. The version increment, the timeout arm, the status code — all visible in one screen of Lean.
+
+## Reading the repo
+
+The spec has two directories under `spec/`:
+
+```text
+spec/
+  01-objects/
+    types.lean   ← wire records, request/response types, enums
+    state.lean   ← ServerState, PromiseObject, TaskObject, effects, M
+  02-actions/
+    00-resume.lean          ← internal: enqueueResume (settlement cascade)
+    02-timeouts.lean        ← internal: promise/task/schedule timeout transitions
+    P-01-promise.get.lean   ← protocol handlers: P- prefix = promise
+    P-02-promise.create.lean
+    ...
+    T-01-task.get.lean      ← T- prefix = task
+    T-02-task.create.lean
+    ...
+    S-01-schedule.get.lean  ← S- prefix = schedule
+    ...
+```
+
+The naming convention is `{P|T|S}-{NN}-{handler.name}.lean`. When you need to verify a claim about `task.acquire`, open `T-03-task.acquire.lean`. When you need the wire shape of `TaskRecord`, open `types.lean`. The file names are the index; you do not need to grep.
+
+`00-resume.lean` and `02-timeouts.lean` are not protocol handlers — they are internal transitions the environment fires. The timeout file handles four transitions across the three timeout lists: promise expiry, task retry, task lease expiry, and schedule fire. Both import `state.lean` for effects and compose the same way protocol handlers do.
+
+Two functions in `state.lean` are declared `opaque`:
+
+```lean
+opaque nextCron : (cron : String) → (after : Nat) → Nat
+opaque expand   : (template id : String) → (timestamp : Nat) → String
+```
+
+`opaque` means the spec asserts these functions exist and satisfy their signatures, but does not define their implementation. `nextCron` (cron arithmetic) and `expand` (schedule promise-id templating) are left to the implementer. They are specified in behavior — the timeouts handler shows exactly how they are called — but not in algorithm. This is an intentional design boundary, not an oversight.
+
+## The mental model for implementers
+
+Your server will be concurrent. It will have threads, connection pools, a transaction layer, and lock contention. None of that appears in the spec, and that is the point.
+
+The spec defines the **observable sequential behavior** your server must produce. For any sequence of requests your server processes, there must exist some sequential order in which the abstract machine produces the same sequence of responses and the same final state. Your server may be concurrent, but its observable behavior must be explainable by some sequential execution of the machine.
+
+This gives you a concrete testing strategy: replay a sequence of requests through the abstract machine, capture its state after each step, run the same sequence through your server, and diff. Any divergence is a bug in your server. Exactly one of the states is wrong.
+
+<Callout type="info" title="Concurrency and isolation are formally unspecified">
+The spec says nothing about how you serialize concurrent requests, what isolation level your storage must provide, or how you handle races between a lease expiry and an in-flight heartbeat. These are real implementation problems — they just live outside the machine's boundary. See [Unspecified surface](/server/unspecified-surface) for a full accounting of what the spec deliberately leaves open.
+</Callout>
+
+The spec's silence on concurrency is not a gap you need to fill before you can use it. You can run the machine on a single thread for testing, verify your handlers match it, and then add concurrency to your production server separately. The machine is the oracle for correctness; your concurrency strategy is the oracle for performance.
+
+The next chapter covers what the machine's state actually contains — the exact fields of every record, which are visible on the wire, and which are internal. See also [testing and conformance](/server/testing-and-conformance) for how to run the machine against your implementation in practice, and [state model](/server/state-model) for the full record definitions.
+
+---
+
+*Verified against [`resonate-specification@83d64c3`](https://github.com/resonatehq/resonate-specification/tree/83d64c3).*

@@ -1,12 +1,151 @@
 ---
 title: "Overview"
 pageTitle: "Build a server"
-description: "How to implement a conformant Distributed Async Await server — abstract machine, state model, storage strategies, and conformance testing."
+description: "Why durable execution is a protocol, what conformance means, and how the three existing implementations prove any sufficiently capable substrate can become a provider."
 hideTitle: true
 ---
 
 # Build a server
 
-This track is coming. It will cover how to implement a conformant Distributed Async Await server.
+The Distributed Async Await protocol is specified twice, on purpose.
+[`resonatehq/resonate-specification`](https://github.com/resonatehq/resonate-specification) is the
+executable abstract machine in Lean 4 — the normative, machine-checkable definition of the protocol's
+core handlers and state transitions. The [/spec pages](/spec) are the prose specification: the
+human-readable companion that explains the same protocol. Where prose and Lean disagree, the Lean
+model wins.
 
-Start with the [Specification](/spec) to understand the protocol, and [`resonatehq/resonate-specification`](https://github.com/resonatehq/resonate-specification) for the normative Lean 4 abstract machine.
+This track is for engineers implementing a conformant server — on a new substrate, in a new language,
+or as an authoritative study of what conformance actually requires.
+
+## Durable execution is a protocol, not a product
+
+Most workflow engines ship as a system you adopt: run their cluster, use their API, accept their
+operational model. The Distributed Async Await design inverts that. The protocol defines an abstract
+machine — a state, a set of atomic effects on that state, and a set of request handlers defined as
+pure functions over both. Any platform that can durably store that state and execute those effects
+atomically can become a durable-execution provider.
+
+This matters practically. Your organization may already operate a relational database, a wide-column
+store, or a message broker. If that substrate can provide durable storage and an atomic
+compare-and-swap-equivalent primitive, it can speak this protocol. You do not need to adopt new
+infrastructure — you need to implement the protocol spec against the infrastructure you already run.
+
+The honest mechanism is: **implement the protocol spec against your platform.** Not "drop in a storage
+adapter to an existing server." Three independent implementations prove the point across three radically
+different storage paradigms; none of them is a plugin to any other.
+
+## What "conformant" means
+
+A conformant server implements the protocol handlers the Lean abstract machine defines and holds the
+invariants the machine specifies after every handler invocation. That is the entire contract.
+
+Concretely:
+
+- Every handler the spec defines — `promise.get`, `promise.create`, `promise.settle`,
+  `promise.register_callback`, `promise.register_listener`, `task.get`, `task.create`,
+  `task.acquire`, `task.fence`, `task.heartbeat`, `task.suspend`, `task.fulfill`, `task.release`,
+  `task.halt`, `task.continue`, `schedule.get`, `schedule.create`, `schedule.delete`, plus the
+  internal `resume` and `timeouts` transitions — must behave as the corresponding Lean function
+  specifies. (The three `*.search` handlers also have Lean definitions: `501`, deliberately.)
+- State transitions must be atomic with respect to the spec's state model. A handler either
+  completes all its effects or none.
+- The invariants the machine holds over promises, tasks, schedules, timeouts, and the outbox must
+  hold after every transition.
+
+What is *not* specified is as important as what is. Transport encoding, authentication, search
+semantics (`promise.search`, `task.search`, `schedule.search` are `501` stubs in the spec),
+cron-expression evaluation, and concurrency limits are intentionally left to the implementer. The
+Lean machine does not model HTTP or JSON at all — though the [prose spec's message-passing
+protocol](/spec/execution-model/message-passing#address-schemes) does name HTTP as the required
+transport, with the envelope encoding defined by the reference server. No specific storage engine is
+required. Those decisions are yours. The handlers and their state semantics are not.
+
+<Callout type="info" title="No public conformance suite yet">
+The mechanism that verifies conformance — an oracle-diff harness that replays operation sequences and
+checks invariants after every step — exists and is used internally. It is not yet public. Treat it as
+an open question rather than a drop-in tool your CI can point at today. The
+[testing and conformance chapter](/server/testing-and-conformance) covers how to build toward that bar now.
+</Callout>
+
+## Three implementations as proof
+
+Three implementations exist today across three distinct storage paradigms. Together they demonstrate
+that substrate independence is a property the protocol already has, not an aspiration.
+
+### resonatehq/resonate — relational SQL, the reference server
+
+[`resonatehq/resonate`](https://github.com/resonatehq/resonate) is the mature reference
+implementation. Written in Rust, licensed Apache-2.0. It ships with three built-in storage backends —
+SQLite, Postgres, and MySQL — selectable at startup. Its HTTP/JSON wire protocol defines the envelope
+all existing Resonate SDKs speak.
+
+This is the implementation to study first. It is the most complete, the most tested, and the one the
+SDKs were built against. When this track says "the reference server," it means this.
+
+### resonatehq/resonate-on-scylladb — wide-column NoSQL
+
+[`resonatehq/resonate-on-scylladb`](https://github.com/resonatehq/resonate-on-scylladb) is a
+complete, independent reimplementation of the protocol in Go, backed by ScyllaDB (a
+Cassandra-compatible wide-column store). It is source-available under BUSL-1.1 (free for development
+and evaluation; commercial license for production; converts to Apache 2.0 on 2030-07-01).
+
+Its consistency mechanism is ScyllaDB Lightweight Transactions — Paxos-based compare-and-swap — which
+realizes the atomic effects the spec requires. It speaks **the same HTTP/JSON envelope as the
+reference server** (protocol version `2026-04-01`, `kind`-multiplexed POST). Any existing Resonate
+SDK points at it unchanged. It is a true drop-in backend swap.
+
+This is an official Resonate HQ project (not a community fork), actively developed. Its test rigor is
+exceptional: oracle-diff against the reference server, random-kill fault injection across 53 named
+invariants (at the time of writing), and Porcupine linearizability verification. It is not yet at 1.0 and has known open
+issues. Label it accordingly — most credible non-reference production story, not yet production-ready.
+
+### resonatehq/resonate-on-nats — message broker
+
+[`resonatehq/resonate-on-nats`](https://github.com/resonatehq/resonate-on-nats) is a complete,
+independent reimplementation of the protocol in Go, backed by NATS JetStream (a message broker and
+key-value store). It is source-available under BUSL-1.1 (free for development and evaluation;
+commercial license for production; converts to Apache 2.0 on 2030-07-01).
+
+Each promise's state lives as a single JSON blob per origin in JetStream KV, written with optimistic
+CAS. Its transport is **NATS pub/sub — not HTTP**. Existing Resonate SDKs cannot talk to it without a
+NATS-aware client or bridge. This is not a drop-in backend swap; it is a NATS-native architecture,
+distinct from the HTTP envelope the other two servers share.
+
+This server is experimental — created June 2026, approximately three weeks of development, minimal
+test coverage. It is architecturally elegant and demonstrates the most surprising paradigm leap (a
+message broker as a durable-execution substrate), but it is not a production story today.
+
+### What the spread proves
+
+Relational SQL, wide-column NoSQL, a message broker. Three storage paradigms, three different
+consistency mechanisms (MVCC + WAL, LWT/Paxos, JetStream KV CAS), and in the NATS case a different
+transport entirely. All three implement the same protocol and interoperate with the same SDK layer
+(with the noted NATS exception on transport). The protocol is substrate-independent.
+
+Neither Go server is a plugin to the Rust server. Each independently reimplements the
+protocol specification from scratch. That independence is the point: the spec is the shared contract,
+not the Rust implementation.
+
+## Chapters in this track
+
+Read [/spec](/spec) first if you have not — the protocol semantics are defined there. The SDK track
+([/sdk](/sdk)) documents the other side of the wire: how a client consumes the handlers you are
+implementing.
+
+| Chapter | What you get |
+|---|---|
+| [Abstract machine](/server/abstract-machine) | The Lean 4 model as an implementer's map — state components, effect types, handler shapes, and how to navigate the spec repo as your primary reference. |
+| [State model](/server/state-model) | The five state components (promises, tasks, schedules, timeouts, outbox) and the invariants your storage layer must maintain over them at all times. |
+| [Envelope and transport](/server/envelope-and-transport) | The HTTP/JSON wire format the reference server uses, what is specified versus what is convention, and how a non-HTTP transport relates. |
+| [Implementing promises](/server/implementing-promises) | All five specified promise handlers — `get`, `create`, `settle`, `register_callback`, `register_listener` — and the settlement scrub inlined at all three settlement sites. |
+| [Implementing tasks](/server/implementing-tasks) | All nine specified task handlers from `acquire` through `halt`/`continue`, the version fencing mechanism, and lease semantics. |
+| [Implementing schedules](/server/implementing-schedules) | The three specified schedule handlers, the `nextCron` question, and the catch-up transition for schedules that fire while the server is down. |
+| [Timeouts and projection](/server/timeouts-and-projection) | How the server fires timeout transitions, what projection means (observing settled state before the transition persists), and the implementation ordering that makes projection safe. |
+| [Outbox and delivery](/server/outbox-and-delivery) | The two outbox message types (`execute` and `unblock`), atomic enqueue with their triggering transitions, and delivery guarantees. |
+| [Storage strategies](/server/storage-strategies) | How the three existing servers map spec effects to relational SQL, wide-column CAS, and JetStream KV — and the patterns that generalize to other substrates. |
+| [Testing and conformance](/server/testing-and-conformance) | The invariants your implementation must hold, how to build an oracle-diff harness, fault injection, and the state of the public conformance question. |
+| [Unspecified surface](/server/unspecified-surface) | Everything the spec deliberately leaves open — transport, auth, search, `nextCron`, `expand`, `preload`, operational knobs. Know the boundary before you make it a requirement. |
+
+---
+
+*Verified against [`resonate-specification@83d64c3`](https://github.com/resonatehq/resonate-specification/tree/83d64c3).*

@@ -1,0 +1,122 @@
+---
+title: "Implementing schedules"
+pageTitle: "Implementing schedules"
+description: "How to implement the three specified schedule handlers (plus the search stub) and the onScheduleTimeout catch-up loop in a conformant DAA server."
+hideTitle: true
+---
+
+# Implementing schedules
+
+A schedule is a cron-driven promise factory. It does not execute work; it fires `promise.create` at each tick, and the promise machinery — tasks, routing, callbacks — handles everything downstream. The four CRUD handlers are straightforward; the semantics live entirely in the timeout firing side.
+
+## The schedule object
+
+A schedule carries everything needed to describe one class of recurring work:
+
+| Field | Role |
+|---|---|
+| `id` | Schedule identifier |
+| `cron` | Cron expression — syntax is **implementation-defined** |
+| `promiseId` | Template string for the created promise's id — expanded per occurrence |
+| `promiseTimeout` | Duration (ms) added to `cronTime` to compute each promise's `timeoutAt` |
+| `promiseParam` | Value passed as `param` to each created promise |
+| `promiseTags` | Tags passed to each created promise |
+| `createdAt` | When the schedule was created |
+| `nextRunAt` | Next scheduled fire time; maintained by the server |
+| `lastRunAt` | Most recent fire time; `none` until the first tick fires |
+
+## S-01 — schedule.get
+
+Lookup by id. Returns `200` with the schedule object, or `404` if none exists. No side effects. ([S-01-schedule.get.lean](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/S-01-schedule.get.lean))
+
+## S-02 — schedule.create
+
+`schedule.create` is fully idempotent. The spec ([S-02-schedule.create.lean](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/S-02-schedule.create.lean)) checks for an existing schedule first:
+
+```lean
+match ← getSchedule req.id with
+| some s =>
+    return { status := 200, schedule := some s }
+| none =>
+    let s : Schedule := { ..., nextRunAt := nextCron req.cron now, lastRunAt := none }
+    setSchedule s
+    setScheduleTimeout s.id s.nextRunAt
+    return { status := 200, schedule := some s }
+```
+
+If a schedule with the given id already exists, it is returned unchanged — no update, no merge. If it does not exist, the server constructs it with `nextRunAt := nextCron req.cron now` and immediately arms the schedule timeout.
+
+**The response is always `200`.** There is no `201 Created`. A caller that needs to distinguish a first create from a duplicate must compare the returned schedule's `createdAt` against its own record.
+
+**`nextCron` is declared `opaque` in the spec.** Its contract — "return the next fire time strictly after the given instant" — is specified; the cron format it interprets is not. Whether you support standard five-field POSIX cron, a six-field variant with seconds, or something else is your choice. Document it; clients depend on it. See [Unspecified surface](/server/unspecified-surface).
+
+## S-03 — schedule.delete
+
+Lookup by id. If not found: return `404`. If found: call `delSchedule` and `delScheduleTimeout` atomically, then return `200`. ([S-03-schedule.delete.lean](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/S-03-schedule.delete.lean))
+
+The timeout disarm is required. Deleting the schedule record while leaving the timeout entry alive means the handler fires against a gone schedule — a no-op in the spec, but a wasted wakeup and a source of confusion in practice. The spec removes both or neither.
+
+## S-04 — schedule.search
+
+The spec ([S-04-schedule.search.lean](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/S-04-schedule.search.lean)) returns `501 Not Implemented` unconditionally. Implement it the same way. Schedule search behavior is unspecified. See [Unspecified surface](/server/unspecified-surface).
+
+## The firing side: onScheduleTimeout and catchUp
+
+When a schedule's timeout fires, the handler does not fire once — it fires for every missed occurrence since the last run. The spec calls this the catch-up loop. ([02-timeouts.lean](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/02-timeouts.lean), lines 77–97)
+
+```lean
+partial def catchUp (now : Nat) (s : Schedule) : M Schedule := do
+  if s.nextRunAt ≤ now then
+    let cronTime := s.nextRunAt
+    let promiseId := expand s.promiseId s.id cronTime
+    let _ ← promiseCreate
+      { id := promiseId, timeoutAt := cronTime + s.promiseTimeout,
+        param := s.promiseParam, tags := s.promiseTags } cronTime
+    catchUp now { s with lastRunAt := some cronTime, nextRunAt := nextCron s.cron cronTime }
+  else
+    return s
+
+def onScheduleTimeout (id : String) (now : Nat) : M Unit := do
+  match ← getSchedule id with
+  | none   => pure ()
+  | some s =>
+      let s ← catchUp now s
+      setSchedule s
+      delScheduleTimeout s.id
+      setScheduleTimeout s.id s.nextRunAt
+```
+
+Trace through one cycle:
+
+1. `catchUp` checks `s.nextRunAt ≤ now`. If yes, this occurrence is due.
+2. `cronTime := s.nextRunAt` — the **logical** time of this occurrence, not the wall clock `now`.
+3. The promise id is computed with `expand s.promiseId s.id cronTime`. **`expand` is declared `opaque` in the spec.** The function signature is `(template id : String) → (timestamp : Nat) → String`; the template substitution syntax is not specified. See [Unspecified surface](/server/unspecified-surface).
+4. `promiseCreate` is called with `cronTime` as the `now` argument. The promise's `timeoutAt` is `cronTime + s.promiseTimeout` — anchored to when the tick *should* have fired, not when the handler ran.
+5. The function recurses with `nextRunAt := nextCron s.cron cronTime` — advancing from the just-fired tick, not from the current wall clock. Each recursive step covers exactly one occurrence.
+6. Base case: `s.nextRunAt > now`. Return the updated schedule.
+
+After `catchUp`, `onScheduleTimeout` writes the updated schedule (with new `nextRunAt` and `lastRunAt`), disarms the current timeout entry, and arms a new one at `s.nextRunAt` — the next upcoming tick.
+
+### Normative shapes
+
+**The catch-up shape is normative.** You must call `promiseCreate` once per missed occurrence, in chronological order, each using its logical `cronTime`. Skipping missed ticks, or firing only the most recent, violates the spec.
+
+**`promiseCreate` is idempotent.** If a promise with the expanded id already exists, the call returns the existing promise and does nothing. Repeated catch-up calls for an already-fired tick are safe.
+
+**Tick-anchored timeouts are a real edge case.** Each created promise gets `timeoutAt = cronTime + s.promiseTimeout`. If `promiseTimeout` is small and the server was down long enough, `cronTime + s.promiseTimeout` may already be in the past. The `promise.create` handler creates an already-expired promise in the settled state rather than pending. Test this path explicitly — an expired-at-creation promise does not dispatch a task.
+
+<Callout type="caution" title="Catch-up fires one promise per missed tick in a tight loop">
+If a server restarts after a long outage, `catchUp` fires `promiseCreate` for every missed occurrence before returning control. A schedule that ticks every minute with a server down for an hour means sixty synchronous promise creates in one timeout handler invocation. Account for this in your storage layer and test it explicitly.
+</Callout>
+
+## Cross-references
+
+- [Timeouts and projection](/server/timeouts-and-projection) — the three timeout lists and when `onScheduleTimeout` is dispatched
+- [Implementing promises](/server/implementing-promises) — `promiseCreate` semantics that `catchUp` relies on, including the already-expired creation path
+- [Outbox and delivery](/server/outbox-and-delivery) — promises created by catch-up dispatch tasks and send execute messages if they carry a `resonate:target` tag
+- [State model](/server/state-model) — `Schedule` and `ScheduleTimeout` struct definitions
+- [Unspecified surface](/server/unspecified-surface) — `nextCron` (cron syntax) and `expand` (promise-id template syntax) are both implementation-defined
+
+---
+
+*Verified against [resonate-specification`@83d64c3`](https://github.com/resonatehq/resonate-specification/tree/83d64c3).*

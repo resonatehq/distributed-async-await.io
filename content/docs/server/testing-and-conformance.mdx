@@ -1,0 +1,120 @@
+---
+title: "Testing and conformance"
+pageTitle: "Testing and conformance: what you can verify today"
+description: "How to build an oracle-diff harness against the public reference state machine, use the debug endpoints for seeded simulation, assert the spec's structural invariants, and understand the current state of public conformance tooling."
+hideTitle: true
+---
+
+# Testing and conformance: what you can verify today
+
+The conformance question is: does your server behave identically to the normative abstract machine for every valid input sequence? This chapter explains the tools and techniques you can reach for today — all of them anchored on public artifacts — and names what does not yet exist publicly so you know what you are not getting.
+
+See also: [Unspecified surface](/server/unspecified-surface) — before you write conformance tests, know which behaviors are yours to choose.
+
+## The oracle: your primary reference
+
+`resonatehq/resonate` ships [`src/oracle.rs`](https://github.com/resonatehq/resonate/blob/main/src/oracle.rs) (Apache-2.0). It is a pure in-memory implementation of every protocol handler — the same `promise.get`, `task.acquire`, `task.suspend`, settlement scrub, and timeout-projection logic the full SQLite/Postgres/MySQL server runs, extracted into a self-contained struct with no I/O:
+
+```rust
+pub struct Oracle {
+    promises: HashMap<String, Promise>,
+    tasks: HashMap<String, Task>,
+    schedules: HashMap<String, Schedule>,
+    p_timeouts: Vec<PTimeout>,
+    t_timeouts: Vec<TTimeout>,
+    s_timeouts: Vec<STimeout>,
+    outgoing: Vec<(String, Value)>,
+}
+
+impl Oracle {
+    pub fn apply(&mut self, req: &RequestEnvelope) -> ResponseEnvelope { ... }
+}
+```
+
+`apply` dispatches a `RequestEnvelope` to the appropriate handler and returns a `ResponseEnvelope`. Every handler is deterministic: given the same state, the same request, and the same `now`, the output is identical every time. The `now` value comes from `req.head.debug_time` if set — overriding the wall clock — which is how seeded simulation works.
+
+The oracle-diff technique is direct: feed the same sequence of `RequestEnvelope` values to an oracle instance *and* to your server. Compare the `ResponseEnvelope` returned by each operation. Then call `debug.snap` on both after each step and diff the snapshots. Any divergence is a bug — either in your implementation or in a model you've built on top of it. The oracle is the tiebreaker.
+
+This is the same technique the [SDK testing guide](/sdk/testing-against-the-spec) teaches for SDK conformance; the direction is reversed (you are the server, not the SDK), but the oracle is the same artifact.
+
+<Callout type="note" title="The Lean spec is also executable">
+The [`resonatehq/resonate-specification`](https://github.com/resonatehq/resonate-specification) repo is a valid Lean 4 project. `lake build` compiles it. You can call handlers directly from a Lean test or extract the generated `.olean` files for programmatic use — giving you a second, formally-checkable oracle layer independent of the Rust oracle. The Lean spec is normative; `oracle.rs` is an authoritative implementation of it. When they agree, you have high confidence.
+</Callout>
+
+## Reference-server debug endpoints
+
+The reference server exposes five debug endpoints, implemented in `src/server.rs`; the `Oracle` struct in `src/oracle.rs` implements the same five independently, for use in oracle-diff testing. They are reference-server tooling — they are not defined by the Lean spec — but they work against any server that implements them, and they are the primitives that make seeded simulation tractable.
+
+**`debug.start` / `debug.stop`**  
+Use them to bracket a test scenario: send `debug.start` before the first operation, `debug.stop` after the last assertion. In the oracle they are explicit no-ops returning `200 {}`; in the running reference server they pause and resume the background processing loops (timeout firing, message delivery) so a test can control when those effects happen.
+
+**`debug.reset`**  
+Clears all state — promises, tasks, schedules, all timeout queues, the outbox. Returns `200 {}`. Call this between test cases to get a clean slate without restarting the process.
+
+**`debug.snap`**  
+Returns the complete current state as a deterministic snapshot:
+
+```json
+{
+  "promises": [...],       // sorted by id
+  "callbacks": [...],      // sorted by awaited, then awaiter
+  "listeners": [...],      // sorted by promise_id, then address
+  "tasks": [...],          // sorted by id
+  "promiseTimeouts": [...], // sorted by id
+  "taskTimeouts": [...],   // sorted by id
+  "messages": [...]        // outbox entries, in emission order
+}
+```
+
+The sorting is deliberate: snapshots are structurally comparable without additional normalization. Diff two snapshots and every difference is meaningful, not an ordering artifact.
+
+**`debug.tick`**  
+The most powerful of the five. Send `{"kind": "debug.tick", "head": {"corrId": "...", "resonate:debug_time": T}, "data": {"time": T}}`. The server advances virtual time to `T` and synchronously fires every timeout that would have matured by `T` (the oracle does this against its in-memory map; the running reference server runs the same timeout processing against persistent storage):
+- Promise timeouts: settles pending promises (timer → `resolved`, else → `rejectedTimedout`), triggers settlement scrub, enqueues `unblock` messages, runs `enqueueResume` on callbacks.
+- Lease timeouts: returns acquired tasks to `pending`, re-arms retry timeout, emits `execute`.
+- Retry timeouts: re-emits `execute` for pending tasks.
+- Schedule timeouts: runs the `catchUp` loop — fires every missed cron occurrence, advances `nextRunAt`.
+
+This lets your test advance from `T=0` to `T=50000` in a single call and observe exactly the state the spec says should result, without waiting on real-time.
+
+<Callout type="caution" title="Keep resonate:debug_time consistent">
+If `head."resonate:debug_time"` is present on a `debug.tick`, it must equal `data.time` — a mismatch returns `400`. Omitting it is not an error, but then virtual time is not applied to the operation. Set it consistently, because `resonate:debug_time` is also what `resolve_time()` uses as `now` for every other operation — so a time-controlled test sequence must set it on every request, not just `debug.tick`.
+</Callout>
+
+## The structural invariants: assert after every operation
+
+The [task model](/spec/system-model/tasks) and [recovery protocol](/spec/execution-model/recovery-protocol#server-invariants) name structural invariants the server must hold after every transition. These are your most valuable assertions because they are total — they say nothing about a specific scenario, only about the state that any valid sequence of operations must produce. A violation pins the bug to the exact step that broke the invariant.
+
+The seven task invariants:
+
+1. **Every task has a corresponding promise** — no orphan tasks.
+2. **Every pending task has a retry timeout** — a claimable-but-unclaimed task will eventually be re-offered.
+3. **Every acquired task has a lease** — a worker that dies is detected and replaced.
+4. **Every suspended task has at least one callback** on a promise it awaits — it can be woken.
+5. **No suspended task has an already-consumed callback** — a settled promise can't leave a task parked forever.
+6. **No suspended task has a timeout** — suspension is open-ended; it waits on a settlement, not a clock.
+7. **No fulfilled task has a timeout** — a terminal task holds no obligations.
+
+The Lean spec is the normative source for these; the [prose spec pages](/spec/system-model/tasks) restate them in readable form. Verify your assertions against the Lean files — several invariant identifiers in the spec source invert the described condition (a `no-timeout`-style name guards "must have a timeout"). Assert the described condition, not the name.
+
+The oracle's `debug.snap` response gives you everything you need to check all seven after every operation in a test loop.
+
+## The ScyllaDB implementation as a worked example
+
+[`resonatehq/resonate-on-scylladb`](https://github.com/resonatehq/resonate-on-scylladb) — source-available under BUSL-1.1 (free for development and evaluation; commercial license for production; converts to Apache 2.0 on 2030-07-01) — demonstrates what a mature conformance-testing posture looks like against a non-reference implementation. Its README describes three test profiles, each runnable as a Docker Compose command:
+
+**Diff tests.** Feed the same operation sequences to the ScyllaDB implementation and to the reference server, compare responses and snapshots. This is oracle-diff with the reference server as oracle — the same technique described above. It exercises the full protocol surface under realistic latency.
+
+**Kill tests.** Inject random process kills during operation sequences and verify that the named invariants all hold after recovery. The invariant set lives in `internal/test/invariants.go` — 53 named invariants at the time of writing, checked on every snapshot (the set grows with the project).
+
+**Linearizability tests.** Run concurrent clients and record the history of operations and responses, then pass the history through [Porcupine](https://github.com/anishathalye/porcupine) — a Go implementation of Wing-Gong linearizability checking. A protocol that is explainable by some sequential execution of the abstract machine will produce a linearizable history. If Porcupine finds no valid sequential explanation, the implementation has a consistency bug.
+
+This three-layer approach — oracle-diff, fault injection against named invariants, linearizability verification — is the shape worth aiming for.
+
+## What is not public today
+
+The conformance harness — the tooling that replays operation sequences against an arbitrary server and checks invariants after every step — exists and is used internally. It is private by design. No public pass/fail conformance suite exists today. Whether one is published is an open question. Do not wait for it; build your own against the oracle-diff and invariant-assertion techniques above.
+
+---
+
+*Verified against [`resonate-specification@83d64c3`](https://github.com/resonatehq/resonate-specification/tree/83d64c3).*

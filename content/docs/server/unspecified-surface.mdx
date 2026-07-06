@@ -1,0 +1,115 @@
+---
+title: "Unspecified surface"
+pageTitle: "Unspecified surface: what the spec deliberately leaves open"
+description: "A reference list of behaviors the Lean spec explicitly does not define — search handlers, nextCron, expand, preload, auth, transport, and concurrency — so implementers know what is theirs to choose."
+hideTitle: true
+---
+
+# Unspecified surface: what the spec deliberately leaves open
+
+The Lean spec says exactly what it says and nothing more. This chapter lists every area the spec deliberately leaves open — with what the spec says (or explicitly doesn't), what the reference server does (labeled as such, verified in source), and what you are free to choose. Check your design against this list before you present any implementation decision as "spec-required."
+
+See also: [Testing and conformance](/server/testing-and-conformance) — how to build conformance tests that stay on the specified side of this boundary.
+
+## The three search handlers: P-06, T-11, S-04
+
+**What the spec says.** The Lean files are unambiguous:
+
+```lean
+-- P-06-promise.search.lean
+def promiseSearch (_req : PromiseSearchReq) (_now : Nat) : M PromiseSearchRes := do
+  return { status := 501 }
+
+-- T-11-task.search.lean
+def taskSearch (_req : TaskSearchReq) (_now : Nat) : M TaskSearchRes := do
+  return { status := 501 }
+
+-- S-04-schedule.search.lean
+def scheduleSearch (_req : ScheduleSearchReq) (_now : Nat) : M ScheduleSearchRes := do
+  return { status := 501 }
+```
+
+The Lean handlers for P-06, T-11, and S-04 ignore their request arguments entirely and return `501`. Filter semantics, pagination, sort order, cursor format — none of this is specified. Sources: [`spec/02-actions/P-06-promise.search.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/P-06-promise.search.lean), [`T-11-task.search.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/T-11-task.search.lean), [`S-04-schedule.search.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/S-04-schedule.search.lean).
+
+**What the reference server does.** The reference server implements all three with cursor-based pagination, optional state filter, and tag containment filter (all provided tags must be present on the returned object). Default page size is 100 for promises and tasks, 10 for schedules; maximum is 1000. Results are sorted by `id` ascending; the cursor is the `id` of the last returned item. This is reference-server convention, not spec behavior.
+
+**What you are free to choose.** Any filter semantics, any pagination scheme, any sort order, any cursor format. You may return `501` and be fully conformant. If you implement search, document what your implementation provides — no client should assume they will get reference-server semantics from a non-reference server.
+
+## `nextCron` and `expand`: declared opaque
+
+**What the spec says.** [`spec/01-objects/state.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/01-objects/state.lean) declares both functions with no body:
+
+```lean
+opaque nextCron : (cron : String) → (after : Nat) → Nat
+opaque expand : (template id : String) → (timestamp : Nat) → String
+```
+
+`nextCron` computes the next cron fire time after a given epoch-millisecond timestamp. `expand` turns a promise-id template and a schedule id into a concrete promise id at a given timestamp. The `opaque` keyword in Lean means: the function exists and has this type, but its definition is hidden — the spec makes no claims about the output for any input. Every handler that uses them (`schedule.create` for `nextCron`, the `catchUp` loop for both) is parameterized by whatever your implementation provides.
+
+**What the reference server does.** `oracle.rs` calls `util::compute_next_cron()` for cron advancement and uses a simple template-substitution expansion: `promise_id_template.replace("{{.id}}", &schedule_id).replace("{{.timestamp}}", &current_timeout.to_string())`. The cron parser is a standard Go/Rust library call; the expansion is literal string substitution with two named placeholders.
+
+**What you are free to choose.** Any standards-compliant cron parser and any cron dialect. Any template expansion format — your promise-id templates can use different placeholder syntax. The only constraint is internal consistency: whatever `expand` produces must be a valid promise id, and `nextCron` must return a timestamp strictly after its `after` argument (otherwise the `catchUp` loop does not terminate).
+
+<Callout type="caution" title="nextCron returning ≤ after will loop forever">
+The `catchUp` transition in `02-timeouts.lean` advances `nextRunAt` by calling `nextCron s.cron cronTime` in a loop until it surpasses `now`. If your `nextCron` implementation ever returns a value ≤ `after`, this loop does not terminate. Validate that your cron library always steps forward.
+</Callout>
+
+## `preload`: present in wire types, semantics unspecified
+
+**What the spec says.** Four response types carry a `preload` field in [`spec/01-objects/types.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/01-objects/types.lean):
+
+```lean
+structure TaskCreateRes where
+  ...
+  preload : List PromiseRecord := []   -- line 180
+
+structure TaskAcquireRes where
+  ...
+  preload : List PromiseRecord := []   -- line 194
+
+structure TaskFenceRes where
+  ...
+  preload : List PromiseRecord := []   -- line 216
+
+structure TaskSuspendRes where
+  ...
+  preload : List PromiseRecord := []   -- line 241
+```
+
+Every handler in the spec that returns one of these types leaves `preload` at the empty-list default. No Lean handler assigns a non-empty list to it. The field exists in the type; its semantics do not.
+
+**What the reference server does.** The reference server populates `preload` in its `preload()` helper (`oracle.rs` lines 2109–2129): it reads the `resonate:branch` tag from the acquired promise's tags and returns all other promises that share the same branch value. The intent is to give the worker a warm cache of sibling promises it will probably need, saving round trips. This optimization is entirely reference-server behavior — not a protocol requirement.
+
+**What you are free to choose.** Return an empty list and you are fully conformant. Populate it with any set of promise records that would be useful to the receiving worker. No client should assume that `preload` is always empty, always populated, or populated by any particular selection criterion. If your implementation populates it, document what you include and why.
+
+## Authentication and authorization
+
+**What the spec says.** Nothing. The abstract machine has no auth model. Every handler takes a request and a current time; there is no principal, no token, no permission check anywhere in the Lean spec. The machine is not multi-tenant and does not distinguish callers.
+
+**What the reference server does.** The reference server provides optional API-key authentication on HTTP requests. It is not part of the protocol and is not modeled.
+
+**What you are free to choose.** Any authentication and authorization scheme, or none. JWT, mTLS, API keys, IP allowlists, internal-network-only deployment — all are valid. None is required.
+
+## Transport encoding
+
+**What the spec says.** The abstract machine models handlers as pure functions `Req → now → M Res`. It does not model HTTP. It does not define JSON. The envelope shape — the `kind`/`head`/`data` structure, the `corrId` field, the `version` string, the HTTP method and path — is not in any Lean file.
+
+**What the reference server does.** The reference server uses an HTTP/JSON transport with a specific envelope format. All existing Resonate SDKs speak this envelope. See [Envelope and transport](/server/envelope-and-transport) for the full definition.
+
+**What you are free to choose.** More than the Lean model constrains, less than the full protocol allows: the [prose spec's message-passing protocol](/spec/execution-model/message-passing#address-schemes) names HTTP as the required transport for a conformant implementation, with other schemes (NATS, Kafka, poll/SSE, gRPC, Unix sockets) optional additions. Within that, serialization details and any extra transports are yours. `resonate-on-nats` demonstrates the trade: it speaks NATS pub/sub instead of HTTP, which is exactly why existing SDKs cannot talk to it without a matching transport layer — plan for that if you deviate.
+
+## Concurrency and isolation
+
+**What the spec says.** The abstract machine is a sequential state machine. Its computation type is `StateM ServerState` — a single-threaded state thread. There is no concurrency primitive, no lock, no transaction isolation level anywhere in the Lean model.
+
+**What this means for your implementation.** Your server must behave *as if* it were executing operations one at a time in some sequential order. Concurrent requests are fine as long as the observable results — responses, state snapshots — are explainable by *some* valid sequential execution of the abstract machine. This is the standard linearizability criterion. See [Abstract machine](/server/abstract-machine) for the state model your concurrent implementation must serialize against.
+
+**What you are free to choose.** Any concurrency model: single-threaded event loop, thread-per-request with mutex, MVCC, Paxos-based LWT (as `resonate-on-scylladb` uses), JetStream KV CAS (as `resonate-on-nats` uses). The test that matters is whether concurrent executions produce a linearizable history against the abstract machine — not whether you used a specific locking primitive to achieve it.
+
+<Callout type="note" title="The version field is your friend here">
+Every task mutation is version-fenced. If two workers race to acquire the same task, one wins the version increment and the other gets `409 Conflict`. You do not need to serialize the entire server to prevent double-acquisition; you need an atomic compare-and-swap on the task's version field. That is the minimal isolation unit the protocol requires.
+</Callout>
+
+---
+
+*Verified against [`resonate-specification@83d64c3`](https://github.com/resonatehq/resonate-specification/tree/83d64c3).*

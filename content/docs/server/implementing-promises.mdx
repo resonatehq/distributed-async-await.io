@@ -1,0 +1,196 @@
+---
+title: "Implementing promises"
+pageTitle: "Implementing the promise handlers"
+description: "Exact semantics for the five specified promise handlers (P-01–P-05) plus the search stub (P-06), derived from the Lean 4 specification: state transitions, idempotency rules, the settlement scrub, and the link between create and task dispatch."
+hideTitle: true
+---
+
+# Implementing the promise handlers
+
+Five specified handlers plus one deliberate stub (`promise.search`) cover the entire promise surface. They share two mechanics you will apply constantly: **timeout projection** — when a pending promise's `timeoutAt ≤ now`, return a computed settled record (`resolved` for a timer promise, `rejectedTimedout` otherwise) *without writing it*; the `onPromiseTimeout` transition is what eventually writes the settlement — and **idempotency** (returning the current state instead of an error on a repeated operation). The full projection story is in [Timeouts and projection](/server/timeouts-and-projection). This chapter applies both handler by handler.
+
+All six are specified formally in [`resonatehq/resonate-specification`](https://github.com/resonatehq/resonate-specification/tree/83d64c3/spec/02-actions).
+
+---
+
+## promise.get — P-01
+
+[`P-01-promise.get.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/P-01-promise.get.lean)
+
+Return the promise identified by `req.id`, applying timeout projection if it is pending and expired.
+
+```text
+404           promise does not exist
+200 + promise promise exists (pending, projected, or already settled)
+```
+
+If the promise is pending and `timeoutAt ≤ now`, do **not** write anything — return a projected record with:
+
+- `state` = `resolved` for timer promises (`resonate:timer = "true"`), `rejectedTimedout` for everything else
+- `settledAt` = `timeoutAt`
+
+The actual settlement write happens in the timeout sweep, not here. Projection is a read-time computation; `promise.get` is never the trigger for a state change.
+
+---
+
+## promise.create — P-02
+
+[`P-02-promise.create.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/P-02-promise.create.lean)
+
+This handler is the busiest in the server. It branches on whether the promise exists, whether it is already expired, and whether it carries scheduling tags.
+
+### When the promise does not yet exist
+
+**Case A — `timeoutAt > now` (normal create):**
+
+1. Write the promise in `pending` state.
+2. If the promise is *external* — carries `resonate:target` or is a timer promise — register a promise timeout at `timeoutAt`. External promises must be swept; promises without a target or timer tag are settled by explicit protocol operations and need no sweep.
+3. If `resonate:target` is set: create a task in `pending` at `version = 0`.
+   - If `resonate:delay` is absent, or its parsed value is ≤ `now`: schedule a retry timeout at `now + retryTimeout` and enqueue an `execute` message to the target address. Work starts immediately.
+   - If `resonate:delay` is set and its value is > `now`: schedule a retry timeout at `delay` only — **do not enqueue execute yet**. The execute fires when that timeout fires. See [Outbox and delivery](/server/outbox-and-delivery).
+4. Return 200 with the new promise record.
+
+`retryTimeout` is a server configuration value; the default in the spec is 5000 ms (`ServerConfig.retryTimeout` in `state.lean`).
+
+**Case B — `timeoutAt ≤ now` (already-expired create):**
+
+The caller asked for a promise with a deadline in the past. Write it directly as settled:
+
+- `state` = `resolved` (timer) or `rejectedTimedout` (everything else)
+- `createdAt = settledAt = timeoutAt`
+
+If `resonate:target` is present, also create a task, but in `fulfilled` state — there is no work to dispatch on an already-expired promise. Return 200.
+
+### When the promise already exists
+
+Return it as-is — or projected if it is pending and expired — and return **200**.
+
+<Callout type="caution" title="There is no 409 on duplicate create">
+`promise.create` never returns 409. A repeated call with the same `id` returns 200 with the existing promise, regardless of whether the new request's parameters match. This surprises engineers coming from create-APIs that use 409 to signal "already exists." Here, idempotency is the default: callers can safely retry a create after a network failure, and the server absorbs the duplicate. Do not add a 409 path — the spec has none.
+</Callout>
+
+The [durable promise specification](/spec/programming-model/durable-promise-specification) documents an extended surface (`ikc`/`iku`/strict modes) that the reference server implements. The Lean model does not specify these modes; a conformant-to-Lean server need not implement them.
+
+---
+
+## promise.settle — P-03
+
+[`P-03-promise.settle.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/P-03-promise.settle.lean)
+
+Settle is a **single parameterized verb**: `state` is a parameter to the request, not a separate operation per outcome. Resolve, reject, and cancel are argument values — there are no `promise.resolve` or `promise.reject` endpoints.
+
+```text
+404           promise does not exist
+200 + promise promise settled (or already settled / projected)
+```
+
+### The write path — pending and unexpired
+
+When the promise is pending and `timeoutAt > now`:
+
+1. Snapshot the promise's current `listeners` and `callbacks` lists.
+2. Write the promise: set `state = req.state`, `value = req.value`, `settledAt = now`, and clear `callbacks` and `listeners` to empty.
+3. Remove the promise timeout (`delPromiseTimeout`). A settled promise has no deadline to sweep.
+4. If a task exists for this promise id: transition it to `fulfilled`, clear `pid`, `ttl`, and `resumes`, and remove its timeout (`delTaskTimeout`).
+5. Run the **settlement scrub** (see below).
+6. Enqueue an `unblock` message to every address in the snapshotted listeners list. See [Outbox and delivery](/server/outbox-and-delivery).
+7. Call `enqueueResume` for each id in the snapshotted callbacks list.
+
+### The settlement scrub
+
+After a promise settles, it can never wake another awaiter — but other pending promises may still have its id in their callbacks lists. The scrub removes those stale registrations:
+
+```lean
+-- From P-03-promise.settle.lean
+modify fun s =>
+  { s with promises := s.promises.map fun q =>
+      if q.state == .pending then
+        { q with callbacks := q.callbacks.filter (· != p.id) }
+      else
+        q }
+```
+
+Walk every promise in the store. For each one that is still pending, filter the settled promise's id out of its callbacks list. Non-pending promises are left alone.
+
+**Why this matters for storage design.** The scrub is a cross-record write — one settlement event triggers a deletion across an unbounded number of rows in whatever table backs promise callbacks. A naive relational schema where callbacks are stored as a JSON array on the promise row makes this an `UPDATE ... SET callbacks = ...` for every pending promise. A separate `callbacks` join table reduces this to a single `DELETE FROM callbacks WHERE awaiter_id = :settled_id`, which scales. The choice of schema here has a measurable effect on settle latency at scale. See [Storage strategies](/server/storage-strategies) for the tradeoffs.
+
+### enqueueResume
+
+`enqueueResume` (`00-resume.lean`) transitions the awaiter's task based on its current state:
+
+- **`suspended`**: move the task to `pending`, set `resumes = [awaitedId]`, schedule a retry timeout at `now + retryTimeout`, and enqueue an `execute` message to the awaiter's `resonate:target` — but only if the awaiter promise exists and its `resonate:target` tag is non-empty; an absent or empty target sends nothing (the state change still happens). The awaiter is now claimable again.
+- **`pending`, `acquired`, or `halted`**: the task is already active; append `awaitedId` to its `resumes` list (deduped). No message is sent — the task will read the updated resumes when it next interacts with the server.
+- **`fulfilled`**: no-op. The awaiter is done.
+
+Note that `enqueueResume` does not check the awaiter promise's deadline. Deadline enforcement on the awaiter happens through the task's own lifecycle — an expired awaiter's own settlement fulfills its task.
+
+### Idempotency
+
+If the promise is already settled (any non-pending state), return it with 200. If it is pending but `timeoutAt ≤ now`, apply timeout projection and return 200. In both cases no write occurs and no messages are enqueued.
+
+The reference server (`oracle.rs`, `trigger_settlement`) implements the same three phases — fulfill the task, process callbacks, notify listeners — through `trigger_fulfilled`, `trigger_callbacks`, and `trigger_listeners` respectively. This is corroboration, not the definition.
+
+---
+
+## promise.register_callback — P-04
+
+[`P-04-promise.register_callback.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/P-04-promise.register_callback.lean)
+
+A callback is an **awaiter promise id**. Registering one tells the server: when the awaited promise settles, run `enqueueResume` for the awaiter.
+
+```text
+404           awaited promise does not exist
+422           awaiter promise does not exist, OR awaiter lacks resonate:target
+200 + promise awaited promise (pending, projected, or settled)
+```
+
+Validate in this order:
+
+1. Look up `req.awaited`. If absent, 404.
+2. Look up `req.awaiter`. If absent, 422.
+3. Check that the awaiter promise carries `resonate:target`. If not, 422. A callback without a target address is useless — `enqueueResume` has nowhere to send the execute message, so the server rejects the registration upfront rather than silently losing the wake-up.
+
+If the awaited promise is pending and `timeoutAt > now`, **and** the awaiter is also pending and `timeoutAt > now`: add `req.awaiter` to the awaited promise's callbacks list (deduped via `addCallback`).
+
+If registration is skipped, the response is still `200` with the awaited promise — but the two skip cases look different to the caller. If the awaited promise is already settled (or expired, and therefore projected settled), the caller sees the settled state and knows to resume immediately. But if the awaited is still pending and only the *awaiter's* condition failed (expired or non-pending), the caller receives a `200` carrying a **pending** awaited promise with no signal that the registration was dropped. An SDK must not treat a pending-state `200` from `promise.register_callback` as proof the callback landed.
+
+<Callout type="note" title="The callback condition is conjunctive">
+Both the awaited and the awaiter must be pending and unexpired for a registration to land. If the awaited is pending but the awaiter has already expired, the callback is silently skipped — a dead awaiter has no task to resume. This is intentional: the settlement scrub (P-03) handles the reverse direction (settling the awaited removes its id from other promises' lists), so missing this registration causes no permanent leak.
+</Callout>
+
+---
+
+## promise.register_listener — P-05
+
+[`P-05-promise.register_listener.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/P-05-promise.register_listener.lean)
+
+A listener is an **address** for `unblock` message delivery. Where a callback wakes a durable awaiter through the task system, a listener delivers a direct notification to any subscriber — an external process, a gateway, a polling client.
+
+```text
+404           awaited promise does not exist
+200 + promise awaited promise (pending, projected, or settled)
+```
+
+If the awaited promise is pending and `timeoutAt > now`: add `req.address` to the promise's listeners list (deduped via `addListener`). The address will receive an `unblock` message when the promise settles, either via `promise.settle` (P-03) or the timeout sweep.
+
+If the promise is already settled or expired: return the current or projected state without registering. The caller can read the settlement value directly from the response — no notification will come.
+
+There is no 422 here. Any address string is accepted; the server does not validate that the address resolves to a reachable subscriber at registration time. See [Outbox and delivery](/server/outbox-and-delivery) for delivery semantics.
+
+---
+
+## promise.search — P-06
+
+[`P-06-promise.search.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/P-06-promise.search.lean)
+
+```text
+501  not implemented — unspecified surface
+```
+
+The Lean spec returns 501 unconditionally. Search semantics — filter shape, pagination, index requirements, sort order — are unspecified. See [Unspecified surface](/server/unspecified-surface).
+
+The reference server implements a search endpoint with tag-based filtering and cursor pagination. That behavior is the reference server's design, not a spec requirement. If you implement search, use the reference server as a practical starting point, but do not treat its behavior as normative.
+
+---
+
+*Verified against [resonate-specification`@83d64c3`](https://github.com/resonatehq/resonate-specification/tree/83d64c3).*

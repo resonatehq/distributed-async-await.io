@@ -1,0 +1,157 @@
+---
+title: "Timeouts and projection"
+pageTitle: "Timeouts and projection"
+description: "The three timeout lists, the four internal transitions, and the projection convention — why your reads and stored state can legally diverge."
+hideTitle: true
+---
+
+# Timeouts and projection
+
+The server maintains three timeout lists and four internal transitions that fire against them. None of these are user-visible API calls; they are background machinery the server runs on its own clock. They are also where the most important correctness property in the machine lives: the **projection convention**, which means that what a handler returns about a promise and what is actually written in storage can legally diverge — and your implementation must handle both sides correctly.
+
+## The three timeout lists
+
+`ServerState` carries three separate timeout lists ([state.lean](https://github.com/resonatehq/resonate-specification/blob/main/spec/01-objects/state.lean), lines 62–76):
+
+```lean
+structure PromiseTimeout where
+  id      : String
+  timeout : Nat
+
+structure TaskTimeout where
+  id      : String
+  kind    : Nat   -- 0 = pending retry, 1 = lease expiration
+  timeout : Nat
+
+structure ScheduleTimeout where
+  id      : String
+  timeout : Nat
+```
+
+**`promiseTimeouts`** is armed when a promise is created — but **only if the promise is external**. A promise is external when it carries a `resonate:target` tag (meaning a task backs it) or a `resonate:timer = "true"` tag ([state.lean](https://github.com/resonatehq/resonate-specification/blob/main/spec/01-objects/state.lean), lines 34–35):
+
+```lean
+def PromiseObject.external (p : PromiseObject) : Bool :=
+  p.tags.has "resonate:target" || p.isTimer
+```
+
+Promises that carry neither tag — pure callback rendezvous points created by the SDK to coordinate internal workflows — are never added to the promise timeout list. Their only settlement path is an explicit `promise.settle` call from a worker.
+
+One exception to the external-only rule: `task.create` ([`T-02-task.create.lean`](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/T-02-task.create.lean), fresh-promise branch) calls `setPromiseTimeout` **unconditionally**, with no externality check — every task-backed promise created through T-02 gets a timeout entry. The tag-gated arming described above is `promise.create`'s (P-02) behavior.
+
+**`taskTimeouts`** carries two logically distinct entries, distinguished by `kind`:
+- `kind = 0`: pending-retry timeout. Set when a task is first created or returned to `pending`. Fires `onTaskRetryTimeout`, which re-issues the execute message.
+- `kind = 1`: lease-expiration timeout. Set when a task is acquired. Fires `onTaskLeaseTimeout`, which reverts the task to pending and re-issues the execute message.
+
+**`scheduleTimeouts`** holds one entry per schedule, set to `nextRunAt`. Fires `onScheduleTimeout`.
+
+## The four internal transitions
+
+### onPromiseTimeout
+
+[02-timeouts.lean](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/02-timeouts.lean), lines 8–41.
+
+Fires when a promise timeout entry matures. Guard: if the promise does not exist, or is not `pending`, this is a no-op. Otherwise:
+
+1. Settle the promise — `resolved` if `p.isTimer`, `rejectedTimedout` otherwise. `settledAt` is set to `p.timeoutAt` (the original deadline), not `now`.
+2. Delete the promise timeout entry.
+3. If a task exists for this promise id: transition it to `fulfilled`, clear `pid`/`ttl`/`resumes`, and delete its task timeout entries.
+4. **Settlement scrub**: scan every pending promise in the store and remove this promise's id from their `callbacks` list. A timed-out promise can never resume an awaiter; callbacks pointing to it would stall forever without this step.
+5. Send an `unblock` message (carrying the settled promise record) to every registered listener address via the outbox.
+6. Call `enqueueResume` for every registered callback (awaiter promise id) — transitioning suspended awaiters back to `pending` and re-issuing their execute messages.
+
+Step 4 is the **settlement scrub**; steps 5–6 are the settlement propagation (listeners, then callbacks). The same three-step block runs identically in `promiseSettle` and `taskFulfill`. `onPromiseTimeout` is the only writer that executes it for expired promises.
+
+### onTaskRetryTimeout
+
+[02-timeouts.lean](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/02-timeouts.lean), lines 43–57.
+
+Fires when a `pending` task's retry timeout (kind 0) matures. Guard: task must exist and be in `pending`. Otherwise no-op.
+
+1. Delete the existing kind-0 timeout entry.
+2. Set a new kind-0 timeout at `now + retryTimeout` (default 5000 ms from `ServerConfig.retryTimeout`).
+3. Re-send an `execute` message to the task's target address (taken from `resonate:target` on the promise).
+
+This is the mechanism that re-offers unclaimed work. A pending task with no worker will be re-dispatched every `retryTimeout` milliseconds until it is acquired or its promise settles.
+
+### onTaskLeaseTimeout
+
+[02-timeouts.lean](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/02-timeouts.lean), lines 59–75.
+
+Fires when an acquired task's lease expires (kind-1 timeout). Guard: task must exist and be in `acquired`. Otherwise no-op.
+
+1. Revert the task to `pending` — clear `pid` and `ttl`.
+2. Delete the existing kind-1 timeout entry.
+3. Set a new kind-0 (pending-retry) timeout at `now + retryTimeout`.
+4. Re-send an `execute` message to the target address.
+
+**The version is not incremented here.** It advances on the next `task.acquire`. A worker that held the lease at version `n` and lost it will find its next mutating operation rejected with `409` once another worker acquires at version `n+1`. See [Implementing tasks](/server/implementing-tasks).
+
+### onScheduleTimeout
+
+[02-timeouts.lean](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/02-timeouts.lean), lines 88–97.
+
+Fires when a schedule's fire time arrives. Runs the `catchUp` loop (which fires `promiseCreate` for every missed occurrence), writes the updated schedule, disarms the current timeout entry, and arms a new one at `nextRunAt`. See [Implementing schedules](/server/implementing-schedules) for the full catch-up semantics.
+
+## The projection convention
+
+This is the hardest property to reason about correctly, and the one most likely to bite you if you skip it.
+
+Several handlers return a promise's state computed from the stored record and the current clock — **without writing the computed state to storage**. This is the projection convention. It appears in `promise.get`, `promise.create` (when the promise already exists), and `promise.settle`. All three follow the same pattern:
+
+> If a stored promise has `state = pending` and `timeoutAt ≤ now`, the handler returns a projected settled record — `resolved` for timer promises (`resonate:timer = "true"`), `rejectedTimedout` for all others, with `settledAt = p.timeoutAt` — **without writing that record to storage**.
+
+The actual write to storage happens only when `onPromiseTimeout` fires.
+
+```text
+Promise created:  { state: pending, timeoutAt: T }
+                          |
+         ... time passes, no timeout handler fired yet ...
+                          |
+              now = T+1   |
+                          ▼
+  promise.get returns:  { state: rejectedTimedout, settledAt: T }
+  storage still holds:  { state: pending, timeoutAt: T }
+                          |
+              now = T+N   |
+                          ▼
+  onPromiseTimeout fires: writes { state: rejectedTimedout, settledAt: T }
+                          sends unblock to listeners
+                          enqueues resumes for callbacks
+```
+
+### Where settlement is actually written
+
+Settlement is written to storage in exactly three places, all of which run the same settlement scrub afterward:
+
+1. **`promiseSettle`** ([P-03](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/P-03-promise.settle.lean)) — direct settle by an API caller, when `p.timeoutAt > now`. If the promise is already expired (`p.timeoutAt ≤ now`), `promiseSettle` returns `200` with the projected state and does **not** write.
+2. **`taskFulfill`** ([T-07](https://github.com/resonatehq/resonate-specification/blob/main/spec/02-actions/T-07-task.fulfill.lean)) — task completes and settles its promise atomically, when `p.state == pending && p.timeoutAt > now`. If the promise is expired, `taskFulfill` returns `409` — the task cannot fulfill against an already-projected promise.
+3. **`onPromiseTimeout`** — the background transition that is the only writer for expired promises. This is what actually delivers the settlement scrub, listener notifications, and callback resumes for timed-out promises.
+
+### Implementation consequences
+
+**Your storage layer must not assume read-your-writes symmetry on promise state.** A query for "all settled promises with `settledAt < T`" will miss promises that have logically expired but haven't been processed by `onPromiseTimeout` yet. A query for "all pending promises" may include promises that would project as settled to any handler that reads them. Both queries are internally consistent — they reflect different moments in the machine — but you must be explicit about which you're asking and why.
+
+**The timeout machinery is a correctness component, not a janitor.** If `onPromiseTimeout` never fires:
+- `promise.get` returns correct results — projection handles it.
+- Listeners never receive their `unblock` message.
+- Awaiting tasks never receive their resume.
+- Work silently stalls — no error, no crash, nothing happening.
+
+An implementation that skips or indefinitely delays promise timeout processing passes every read-path test and fails every durability test. Build the timeout dispatch loop with the same care as the write handlers, and test it explicitly: create a promise with a short `timeoutAt`, let it expire, verify that the listener receives `unblock` and the awaiting task transitions to `pending`.
+
+<Callout type="caution" title="This will bite you if your storage index drives reads">
+If your storage layer builds an index over the `state` field for efficient lookups and you answer `promise.get` from that index, expired promises will return `pending` when they should return `rejectedTimedout`. Projection must happen in handler logic — after the read, before the response — not in the index. Any pending promise whose `timeoutAt ≤ now` must be projected at the point of response construction, even if the storage record still says `pending`.
+</Callout>
+
+## Cross-references
+
+- [Implementing promises](/server/implementing-promises) — `promiseSettle`, `promise.create`, and where promise timeouts are armed
+- [Implementing tasks](/server/implementing-tasks) — `taskFulfill`, version increment on re-acquire, lease and retry timeout lifecycle
+- [Implementing schedules](/server/implementing-schedules) — `onScheduleTimeout` and the catch-up loop
+- [Outbox and delivery](/server/outbox-and-delivery) — `unblock` and `execute` messages emitted by timeout transitions
+- [State model](/server/state-model) — `PromiseTimeout`, `TaskTimeout`, `ScheduleTimeout` struct definitions
+
+---
+
+*Verified against [resonate-specification`@83d64c3`](https://github.com/resonatehq/resonate-specification/tree/83d64c3).*

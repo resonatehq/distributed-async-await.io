@@ -1,5 +1,24 @@
 {
   "root": true,
   "title": "Build a server",
-  "pages": ["index"]
+  "pages": [
+    "index",
+    "---The machine---",
+    "abstract-machine",
+    "state-model",
+    "---The wire---",
+    "envelope-and-transport",
+    "---The handlers---",
+    "implementing-promises",
+    "implementing-tasks",
+    "implementing-schedules",
+    "---Internal transitions---",
+    "timeouts-and-projection",
+    "outbox-and-delivery",
+    "---Production wedge---",
+    "storage-strategies",
+    "testing-and-conformance",
+    "---Boundaries---",
+    "unspecified-surface"
+  ]
 }
