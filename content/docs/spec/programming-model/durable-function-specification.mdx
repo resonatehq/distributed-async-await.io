@@ -1,0 +1,85 @@
+---
+title: Durable Function Specification
+description: Formal definition of interruption tolerance and the constraints a function must satisfy for the equivalence to hold.
+keywords:
+  - durable-function
+  - interruption-tolerance
+  - determinism
+  - idempotency
+  - replay
+  - specification
+---
+
+<Callout type="info" title="Recoverable function executions">
+Durability is a property of a function execution that allows it to be resumed after an interruption.
+</Callout>
+
+## Durable executions
+
+A durable execution is a programming abstraction with an interruption-agnostic *definition* resulting in an interruption-transparent *execution*. The defining characteristic of durable executions is that they are both interruption-agnostic and interruption-transparent — being only one is not sufficient.
+
+### Interruption
+
+The term _interruption_ refers to a voluntary (system-triggered) or involuntary (environment-triggered) termination mid execution. A voluntary termination is also referred to as an _interrupt_; an involuntary termination is also referred to as a _failure_.
+
+### Interruption-agnostic definition
+
+The term _interruption-agnostic definition_ refers to a definition (program, code) that does not acknowledge the possibility of interruptions. The definition does not contain interruption detection or interruption mitigation.
+
+### Interruption-transparent execution
+
+The term _interruption-tolerant execution_ refers to an execution that does not externalize (make observable) the presence of interruptions. An execution that experiences an interruption and subsequently recovers is equivalent to some execution that does not experience an interruption.
+
+<Callout type="info" title="Interruption tolerance, defined">
+Interruption tolerance can be defined formally as:
+
+```
+(⟨p⟩, →(+interruption)) ≃ (⟨p⟩, →(-interruption))
+```
+
+**In words.** A program `p` is interruption-tolerant if, starting from an initial configuration `⟨p⟩`, an execution in the presence of interruptions `(⟨p⟩, →(+interruption))` is equivalent to some execution in the absence of interruptions `(⟨p⟩, →(-interruption))`.
+</Callout>
+
+## Preconditions for the equivalence
+
+The equivalence above is conditional. For an execution to be interruption-tolerant in practice, the function must satisfy three constraints.
+
+### 1. Determinism
+
+Same inputs always produce the same control-flow path. A durable function may be replayed from the beginning after a crash; if a second execution makes different decisions than the first — picks a different branch, reads a different timestamp, observes a different random value — replay is no longer equivalent to the original execution.
+
+In practice, determinism requires interception of every source of non-determinism the function consumes, including:
+
+- **Time** — wall-clock timestamps must be retrieved through a durable primitive so the recorded value is replayed, not re-sampled.
+- **Randomness** — pseudo-random values must be retrieved through a durable primitive for the same reason.
+- **External I/O** — any call whose result depends on the outside world (network requests, file reads, queue lookups) must be wrapped as a step whose result is recorded and replayed.
+
+The protocol does not prescribe the surface of these primitives; reference implementations expose them as context-bound calls (for example, `ctx.run(...)` for arbitrary I/O steps, plus typed helpers for clock and randomness).
+
+### 2. Idempotency
+
+Side effects must be safe to retry. A durable function may execute the same step more than once across the lifecycle of a logical execution — once on the original physical execution, again on a successor after recovery. The function's externalized effects must converge regardless of how many times each step runs.
+
+The protocol provides one half of idempotency for free: every step is associated with a deterministically-derived [Durable Promise](/spec/programming-model/durable-promise-specification) id, and the state-transition table guarantees that subsequent attempts to settle a promise with a matching idempotency key are deduplicated rather than repeated. The other half — that the *content* of a step is itself replay-safe — is the function author's responsibility.
+
+### 3. Activation lifetime
+
+A function execution cannot outlive the physical process that hosts it. This is a consequence of the [process lifecycle model](/spec/system-model/processes): events outside the `(init, term)` interval cannot be emitted. Long-running work — sleep, await for external input, multi-day workflows — must be expressed through protocol primitives (durable sleep, durable promises awaiting external settlement) so that the *logical* execution can outlive any one physical execution while no individual physical execution does.
+
+## Why the constraints matter
+
+The three constraints are not arbitrary. They are the preconditions under which the formal interruption-tolerance equivalence holds:
+
+| Constraint | What breaks without it |
+|---|---|
+| Determinism | Replay produces a different control-flow path; the recovered execution is not equivalent to the original |
+| Idempotency | A retried step externalizes a side effect twice; the recovered execution is observably different from one without interruption |
+| Activation lifetime | A "long-running" execution cannot be recovered at all because no physical successor can take over from the dead one |
+
+Together they define what it means to write a function the protocol can recover.
+
+<Callout type="caution" title="Specification in progress">
+This page captures the constraints any conformant durable function must satisfy and the formal equivalence that defines interruption tolerance. A more rigorous treatment of step composition, durable side-effect semantics, and the formal relationship between durable function state and durable promise state is in progress.
+
+For the operational shape of durable functions in working systems, see the [Durable Promise Specification](/spec/programming-model/durable-promise-specification) (the state on which durable functions execute) and the [TypeScript](https://docs.resonatehq.io/develop/typescript), [Python](https://docs.resonatehq.io/develop/python), and [Rust](https://docs.resonatehq.io/develop/rust) SDKs (how each language realizes durable functions).
+</Callout>

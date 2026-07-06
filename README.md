@@ -1,20 +1,22 @@
 # distributed-async-await.io
 
-The **SDK author's handbook** for [Resonate](https://www.resonatehq.io) — how to build a Resonate SDK
-that implements the Distributed Async Await protocol in any language.
+The home of the **Distributed Async Await protocol**, in three tracks:
 
-This site is the implementer-facing companion to the other Resonate documentation surfaces:
+- **[/spec](https://distributed-async-await.io/spec)** — the prose specification (protocol definitions,
+  models, and the durable-promise contract).
+- **[/server](https://distributed-async-await.io/server)** — how to build a conformant Distributed Async
+  Await server.
+- **[/sdk](https://distributed-async-await.io/sdk)** — how to build an SDK that implements the protocol
+  in any language.
 
-- **[docs.resonatehq.io](https://docs.resonatehq.io)** — how to *use* Resonate (adopter docs + SDK guides).
-- **[github.com/resonatehq/resonate-specification](https://github.com/resonatehq/resonate-specification)** — the normative
-  executable protocol specification: the Resonate protocol as an abstract machine in Lean 4, the
-  machine-checkable ground truth for handler and state-transition semantics.
-- **[docs.resonatehq.io/spec](https://docs.resonatehq.io/spec)** — the Distributed Async Await prose specification
-  (protocol definitions, models, and the durable-promise contract).
-- **distributed-async-await.io** (this repo) — how to *build* an SDK against that spec.
+The Distributed Async Await protocol is specified twice, on purpose.
+[github.com/resonatehq/resonate-specification](https://github.com/resonatehq/resonate-specification) is
+the executable abstract machine in Lean 4 — the normative, machine-checkable definition of every handler
+and state transition. This site is the prose specification: the human-readable companion that explains
+the same protocol. Where prose and Lean disagree, the Lean model wins.
 
-The seam: the spec tells you what wire bytes to produce; this handbook teaches you how to turn those
-bytes into an idiomatic library someone wants to use.
+For how to *use* Resonate, the protocol's reference implementation, see
+**[docs.resonatehq.io](https://docs.resonatehq.io)** (adopter docs + SDK guides).
 
 ## Stack
 
@@ -31,6 +33,6 @@ npm run build        # next build + llms.txt generation
 npm run check-links  # linkinator over the built site
 ```
 
-Content lives in [`content/docs/`](content/docs/) as MDX. Chapter order is set in
-[`content/docs/meta.json`](content/docs/meta.json). Every page keeps a body `# H1` — it is the
-load-bearing title for search and downstream ingestion.
+Content lives in [`content/docs/`](content/docs/) as MDX, one folder per track (`spec/`, `server/`,
+`sdk/`). Track and page order is set in each folder's `meta.json`. Handbook pages keep a body `# H1` —
+it is the load-bearing title for search and downstream ingestion.

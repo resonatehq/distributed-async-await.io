@@ -1,0 +1,42 @@
+---
+title: Execution model
+description: Coordination, recovery, and message-passing protocols that make distributed programs make progress.
+keywords:
+  - execution-model
+  - coordination
+  - recovery
+  - message-passing
+---
+
+<Callout type="info" title="How Distributed Async Await works">
+The execution model lays out the algorithms, protocols, and object specifications that make Distributed Async Await work at a platform level.
+</Callout>
+
+The execution model is structured into three protocols:
+
+- **[Coordination Protocol](/spec/execution-model/coordination-protocol)** — coordination of distributed function executions across partial order.
+- **[Recovery Protocol](/spec/execution-model/recovery-protocol)** — detection and recovery of crash failures across partial failure.
+- **[Message Passing Protocol](/spec/execution-model/message-passing)** — the underlying transport-layer contract for sending and receiving between processes.
+
+<DocCardList
+  items={[
+    {
+      type: "link",
+      label: "Coordination Protocol",
+      href: "/spec/execution-model/coordination-protocol",
+      description: "How callers and remote callees coordinate via durable promises with eventual or immediate resumption.",
+    },
+    {
+      type: "link",
+      label: "Recovery Protocol",
+      href: "/spec/execution-model/recovery-protocol",
+      description: "How a logical execution survives the failure of a physical process via durable promises and tasks.",
+    },
+    {
+      type: "link",
+      label: "Message Passing Protocol",
+      href: "/spec/execution-model/message-passing",
+      description: "Send and receive semantics, addressing (UniCast / AnyCast), and the canonical Invoke / Resume interaction.",
+    },
+  ]}
+/>

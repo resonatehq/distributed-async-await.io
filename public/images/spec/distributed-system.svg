@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xl="http://www.w3.org/1999/xlink" version="1.1" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns="http://www.w3.org/2000/svg" viewBox="119 2589.026 2042 842" width="2042" height="842">
+  <defs/>
+  <g id="Canvas_2" stroke="none" stroke-opacity="1" fill="none" fill-opacity="1" stroke-dasharray="none">
+    <title>Canvas 2</title>
+    <rect fill="white" x="119" y="2589.026" width="2042" height="842"/>
+    <g id="Canvas_2_Layer_1">
+      <title>Layer 1</title>
+      <g id="Line_177">
+        <line x1="361" y1="2710.026" x2="1919" y2="2710.026" stroke="#353f58" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Line_176">
+        <line x1="361" y1="3010.026" x2="1919" y2="3010.026" stroke="#353f58" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Line_175">
+        <line x1="361" y1="3310.026" x2="1919" y2="3310.026" stroke="#353f58" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Graphic_174">
+        <path d="M 129 2590.026 L 351 2590.026 C 355.97056 2590.026 360 2594.0554 360 2599.026 L 360 2821.026 C 360 2825.9965 355.97056 2830.026 351 2830.026 L 129 2830.026 C 124.02944 2830.026 120 2825.9965 120 2821.026 L 120 2599.026 C 120 2594.0554 124.02944 2590.026 129 2590.026 Z" fill="white"/>
+        <path d="M 129 2590.026 L 351 2590.026 C 355.97056 2590.026 360 2594.0554 360 2599.026 L 360 2821.026 C 360 2825.9965 355.97056 2830.026 351 2830.026 L 129 2830.026 C 124.02944 2830.026 120 2825.9965 120 2821.026 L 120 2599.026 C 120 2594.0554 124.02944 2590.026 129 2590.026 Z" stroke="#353f58" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
+        <text transform="translate(125 2690.526)" fill="#353f58">
+          <tspan font-family="Montserrat" font-size="32" fill="#353f58" x="58.029416" y="31" xml:space="preserve">State A</tspan>
+        </text>
+      </g>
+      <g id="Graphic_173">
+        <rect x="420" y="2590.026" width="360" height="240" fill="white"/>
+        <rect x="420" y="2590.026" width="360" height="240" stroke="#353f58" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
+        <text transform="translate(425 2690.526)" fill="black">
+          <tspan font-family="Montserrat" font-size="32" fill="black" x="115.7606" y="31" xml:space="preserve">Node A</tspan>
+        </text>
+      </g>
+      <g id="Graphic_172">
+        <circle cx="900" cy="2710.026" r="60.0000958741138" fill="white"/>
+        <circle cx="900" cy="2710.026" r="60.0000958741138" stroke="#353f58" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
+      </g>
+      <g id="Graphic_171">
+        <rect x="1020" y="2590.026" width="240" height="840" fill="#353f58"/>
+        <rect x="1020" y="2590.026" width="240" height="840" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Graphic_170">
+        <rect x="1500" y="2590.026" width="360" height="240" fill="white"/>
+        <rect x="1500" y="2590.026" width="360" height="240" stroke="#353f58" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
+        <text transform="translate(1505 2690.526)" fill="black">
+          <tspan font-family="Montserrat" font-size="32" fill="black" x="115.17231" y="31" xml:space="preserve">Node B</tspan>
+        </text>
+      </g>
+      <g id="Graphic_169">
+        <circle cx="1380" cy="2710.026" r="60.0000958741138" fill="white"/>
+        <circle cx="1380" cy="2710.026" r="60.0000958741138" stroke="#353f58" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
+      </g>
+      <g id="Graphic_168">
+        <path d="M 1929 2590.026 L 2151 2590.026 C 2155.9706 2590.026 2160 2594.0554 2160 2599.026 L 2160 2821.026 C 2160 2825.9965 2155.9706 2830.026 2151 2830.026 L 1929 2830.026 C 1924.0294 2830.026 1920 2825.9965 1920 2821.026 L 1920 2599.026 C 1920 2594.0554 1924.0294 2590.026 1929 2590.026 Z" fill="white"/>
+        <path d="M 1929 2590.026 L 2151 2590.026 C 2155.9706 2590.026 2160 2594.0554 2160 2599.026 L 2160 2821.026 C 2160 2825.9965 2155.9706 2830.026 2151 2830.026 L 1929 2830.026 C 1924.0294 2830.026 1920 2825.9965 1920 2821.026 L 1920 2599.026 C 1920 2594.0554 1924.0294 2590.026 1929 2590.026 Z" stroke="#353f58" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
+        <text transform="translate(1925 2690.526)" fill="#353f58">
+          <tspan font-family="Montserrat" font-size="32" fill="#353f58" x="57.44113" y="31" xml:space="preserve">State B</tspan>
+        </text>
+      </g>
+      <g id="Graphic_167">
+        <path d="M 129 2890.026 L 351 2890.026 C 355.97056 2890.026 360 2894.0554 360 2899.026 L 360 3121.026 C 360 3125.9965 355.97056 3130.026 351 3130.026 L 129 3130.026 C 124.02944 3130.026 120 3125.9965 120 3121.026 L 120 2899.026 C 120 2894.0554 124.02944 2890.026 129 2890.026 Z" fill="white"/>
+        <path d="M 129 2890.026 L 351 2890.026 C 355.97056 2890.026 360 2894.0554 360 2899.026 L 360 3121.026 C 360 3125.9965 355.97056 3130.026 351 3130.026 L 129 3130.026 C 124.02944 3130.026 120 3125.9965 120 3121.026 L 120 2899.026 C 120 2894.0554 124.02944 2890.026 129 2890.026 Z" stroke="#353f58" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
+        <text transform="translate(125 2990.526)" fill="#353f58">
+          <tspan font-family="Montserrat" font-size="32" fill="#353f58" x="58.16593" y="31" xml:space="preserve">State C</tspan>
+        </text>
+      </g>
+      <g id="Graphic_166">
+        <rect x="420" y="2890.026" width="360" height="240" fill="white"/>
+        <rect x="420" y="2890.026" width="360" height="240" stroke="#353f58" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
+        <text transform="translate(425 2990.526)" fill="black">
+          <tspan font-family="Montserrat" font-size="32" fill="black" x="115.89711" y="31" xml:space="preserve">Node C</tspan>
+        </text>
+      </g>
+      <g id="Graphic_165">
+        <circle cx="900" cy="3010.026" r="60.0000958741137" fill="white"/>
+        <circle cx="900" cy="3010.026" r="60.0000958741137" stroke="#353f58" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
+      </g>
+      <g id="Graphic_164">
+        <rect x="1500" y="2890.026" width="360" height="240" fill="white"/>
+        <rect x="1500" y="2890.026" width="360" height="240" stroke="#353f58" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
+        <text transform="translate(1505 2990.526)" fill="black">
+          <tspan font-family="Montserrat" font-size="32" fill="black" x="114.02404" y="31" xml:space="preserve">Node D</tspan>
+        </text>
+      </g>
+      <g id="Graphic_163">
+        <circle cx="1380" cy="3010.026" r="60.0000958741137" fill="white"/>
+        <circle cx="1380" cy="3010.026" r="60.0000958741137" stroke="#353f58" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
+      </g>
+      <g id="Graphic_162">
+        <path d="M 1929 2890.026 L 2151 2890.026 C 2155.9706 2890.026 2160 2894.0554 2160 2899.026 L 2160 3121.026 C 2160 3125.9965 2155.9706 3130.026 2151 3130.026 L 1929 3130.026 C 1924.0294 3130.026 1920 3125.9965 1920 3121.026 L 1920 2899.026 C 1920 2894.0554 1924.0294 2890.026 1929 2890.026 Z" fill="white"/>
+        <path d="M 1929 2890.026 L 2151 2890.026 C 2155.9706 2890.026 2160 2894.0554 2160 2899.026 L 2160 3121.026 C 2160 3125.9965 2155.9706 3130.026 2151 3130.026 L 1929 3130.026 C 1924.0294 3130.026 1920 3125.9965 1920 3121.026 L 1920 2899.026 C 1920 2894.0554 1924.0294 2890.026 1929 2890.026 Z" stroke="#353f58" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
+        <text transform="translate(1925 2990.526)" fill="#353f58">
+          <tspan font-family="Montserrat" font-size="32" fill="#353f58" x="56.29286" y="31" xml:space="preserve">State D</tspan>
+        </text>
+      </g>
+      <g id="Graphic_161">
+        <path d="M 129 3190.026 L 351 3190.026 C 355.97056 3190.026 360 3194.0554 360 3199.026 L 360 3421.026 C 360 3425.9965 355.97056 3430.026 351 3430.026 L 129 3430.026 C 124.02944 3430.026 120 3425.9965 120 3421.026 L 120 3199.026 C 120 3194.0554 124.02944 3190.026 129 3190.026 Z" fill="white"/>
+        <path d="M 129 3190.026 L 351 3190.026 C 355.97056 3190.026 360 3194.0554 360 3199.026 L 360 3421.026 C 360 3425.9965 355.97056 3430.026 351 3430.026 L 129 3430.026 C 124.02944 3430.026 120 3425.9965 120 3421.026 L 120 3199.026 C 120 3194.0554 124.02944 3190.026 129 3190.026 Z" stroke="#353f58" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
+        <text transform="translate(125 3290.526)" fill="#353f58">
+          <tspan font-family="Montserrat" font-size="32" fill="#353f58" x="58.80273" y="31" xml:space="preserve">State E</tspan>
+        </text>
+      </g>
+      <g id="Graphic_160">
+        <rect x="420" y="3190.026" width="360" height="240" fill="white"/>
+        <rect x="420" y="3190.026" width="360" height="240" stroke="#353f58" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
+        <text transform="translate(425 3290.526)" fill="black">
+          <tspan font-family="Montserrat" font-size="32" fill="black" x="116.53391" y="31" xml:space="preserve">Node E</tspan>
+        </text>
+      </g>
+      <g id="Graphic_159">
+        <circle cx="900" cy="3310.026" r="60.0000958741137" fill="white"/>
+        <circle cx="900" cy="3310.026" r="60.0000958741137" stroke="#353f58" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
+      </g>
+      <g id="Graphic_158">
+        <rect x="1500" y="3190.026" width="360" height="240" fill="white"/>
+        <rect x="1500" y="3190.026" width="360" height="240" stroke="#353f58" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
+        <text transform="translate(1505 3290.526)" fill="black">
+          <tspan font-family="Montserrat" font-size="32" fill="black" x="117.11258" y="31" xml:space="preserve">Node F</tspan>
+        </text>
+      </g>
+      <g id="Graphic_157">
+        <circle cx="1380" cy="3310.026" r="60.0000958741137" fill="white"/>
+        <circle cx="1380" cy="3310.026" r="60.0000958741137" stroke="#353f58" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
+      </g>
+      <g id="Graphic_156">
+        <path d="M 1929 3190.026 L 2151 3190.026 C 2155.9706 3190.026 2160 3194.0554 2160 3199.026 L 2160 3421.026 C 2160 3425.9965 2155.9706 3430.026 2151 3430.026 L 1929 3430.026 C 1924.0294 3430.026 1920 3425.9965 1920 3421.026 L 1920 3199.026 C 1920 3194.0554 1924.0294 3190.026 1929 3190.026 Z" fill="white"/>
+        <path d="M 1929 3190.026 L 2151 3190.026 C 2155.9706 3190.026 2160 3194.0554 2160 3199.026 L 2160 3421.026 C 2160 3425.9965 2155.9706 3430.026 2151 3430.026 L 1929 3430.026 C 1924.0294 3430.026 1920 3425.9965 1920 3421.026 L 1920 3199.026 C 1920 3194.0554 1924.0294 3190.026 1929 3190.026 Z" stroke="#353f58" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
+        <text transform="translate(1925 3290.526)" fill="#353f58">
+          <tspan font-family="Montserrat" font-size="32" fill="#353f58" x="59.381396" y="31" xml:space="preserve">State F</tspan>
+        </text>
+      </g>
+      <g id="Graphic_134">
+        <text transform="translate(1120.5 3078.74) rotate(-90)" fill="white">
+          <tspan font-family="Montserrat" font-size="32" fill="white" x="73896445e-20" y="31" xml:space="preserve">Network</tspan>
+        </text>
+      </g>
+    </g>
+  </g>
+</svg>

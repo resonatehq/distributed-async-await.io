@@ -1,0 +1,115 @@
+---
+title: Recovery Protocol
+description: How a logical execution survives the failure of a physical process — settlement chain, lease and heartbeat, and the invariants a conformant server maintains.
+keywords:
+  - recovery-protocol
+  - distributed-recovery
+  - settlement-chain
+  - fail-stop
+  - lease
+  - heartbeat
+  - invariants
+---
+
+<Callout type="info" title="Recovery across time and space">
+The **Distributed Recovery Protocol** is responsible for the detection and recovery of crash failures.
+</Callout>
+
+## What recovery means
+
+Recovery is the mechanism by which a [logical execution](/spec/system-model/executions) survives the [failure](/spec/system-model/processes#failure) of a physical process. Distributed Async Await assumes a fail-stop process failure model: a process may non-deterministically terminate without warning. When that happens, the logical execution suspends and a successor physical execution can resume the work.
+
+Recovery is the second of the two foundational protocols in Distributed Async Await:
+
+- The [Coordination Protocol](/spec/execution-model/coordination-protocol) ensures coordination across **partial order** — the non-deterministic interleaving inherent to concurrent systems.
+- The Recovery Protocol ensures recovery across **partial failure** — the non-deterministic termination inherent to distributed systems.
+
+## Three load-bearing pieces
+
+The recovery semantics described below rest on three load-bearing pieces:
+
+1. **Durable Promises persist execution state.** The state required to recreate a function execution is stored externally to any single process. See the [Durable Promise Specification](/spec/programming-model/durable-promise-specification).
+2. **Function executions are interruption-tolerant.** Re-running a durable function from the beginning, with deduplication via durable promises, converges to the same result as an uninterrupted execution. See the [Durable Function Specification](/spec/programming-model/durable-function-specification).
+3. **Tasks claim work and report liveness.** Workers claim tasks from the durable system, heartbeat to indicate progress, and surrender claims on crash. See the [Tasks](/spec/system-model/tasks) page for the full lifecycle.
+
+## Lease and heartbeat
+
+Liveness is enforced by a lease. When a worker acquires a task, the server records a deadline by which the worker must signal it is still making progress. Each successful heartbeat extends that deadline.
+
+```text
+acquire      →  lease = now + leaseTimeout, version++
+heartbeat    →  lease = now + leaseTimeout
+release      →  lease deleted, transition back to pending (version unchanged)
+lease expiry →  transition back to pending (version unchanged), re-enqueue execute
+```
+
+Heartbeat is **process-level, not task-level**: a worker sends one heartbeat for all the acquired tasks it holds, and the server refreshes every matching `(id, version)` pair in a single round-trip. Workers typically heartbeat at roughly half the lease interval to absorb transient network delay.
+
+If a worker crashes — or loses the ability to make progress — its lease expires. The server transitions the task back to `pending` (without changing the version), deletes the lease, and re-enqueues the execute message. A successor worker calls `task.acquire`, which increments the version, and any in-flight operation from the prior worker will then fail with 409 on its next mutating call.
+
+The version is the optimistic concurrency control (OCC) token: every mutating task operation must present the current version, and the server returns `409 Conflict` on mismatch. This guarantees a worker that has lost the lease cannot still effect a settle or a fulfill — the new version on the task means the late operation collides with whatever the successor is doing.
+
+## The settlement chain
+
+Every promise settlement — whether triggered by `promise.settle`, `task.fulfill`, `task.fence`, or a server-driven timeout — proceeds through the same three stages, each producing a distinct kind of effect. We call this the **settlement chain** because the stages form a linear causal order:
+
+```text
+settle → resume → execute
+```
+
+1. **Settle (intra-object).** The composite settles itself. The promise transitions to its terminal state, `value` and `settledAt` are recorded, the promise timeout is deleted, the task (if present) transitions to `fulfilled`, and the callbacks and listeners are consumed. *External side effect:* one **unblock** message is sent to each listener address.
+
+2. **Resume (inter-object, internal side effect).** For each callback that was registered on the settled promise, enqueue a resume on the awaiter's task — mutating another composite's task state within the server.
+
+3. **Execute (external side effect).** When the resume transitions an awaiter task from `suspended` to `pending`, the server sends an **execute** message to that task's `resonate:target` address.
+
+The chain is linear, not recursive. Settling composite X does not settle any other composite. It may resume awaiter tasks, which may eventually lead those composites to settle through their own future operations — but not as part of this settlement.
+
+The essential guarantee: **when a promise settles, all dependents are reliably notified.**
+
+## Properties a conformant implementation must guarantee
+
+A Recovery Protocol implementation must satisfy:
+
+- **Liveness under failure.** A logical execution's progress is bounded by the availability of *some* worker, not any specific worker. If a worker crashes, a successor must be able to resume.
+- **Safety under recovery.** A re-invoked durable function must not externalize observable side effects twice. Side-effect deduplication is provided by the durable promises representing each step.
+- **Bounded re-execution.** A worker that has lost the ability to make progress must yield its task claim within a bounded time so a successor can take over without indefinite waiting. The lease enforces this bound.
+
+## Server invariants
+
+Recovery rests on structural invariants the server maintains over its promise, task, and callback stores at all times. A violation indicates a bug in the implementation, not a recoverable runtime condition.
+
+### Promise invariants
+
+| Invariant | Condition |
+|---|---|
+| `orphan_invokes` | Every pending promise with `resonate:target` must have a task. |
+| `missing_ptimeout` | Every pending promise must have a promise timeout entry. |
+| `stale_ptimeout` | No promise timeout should exist for a non-pending promise. |
+| `timedout_settled_at_mismatch` | Every `rejected_timedout` promise must have `settledAt == timeoutAt`. |
+| `listener_for_settled_promise` | No listener should exist for a non-pending promise. |
+
+### Task invariants
+
+| Invariant | Condition |
+|---|---|
+| `orphan_tasks` | Every task must have a corresponding promise. |
+| `pending_task_no_ttimeout` | Every pending task must have a retry timeout. |
+| `acquired_task_no_lease` | Every acquired task must have a lease. |
+| `suspended_no_callback` | Every suspended task must have at least one callback registered on an awaited promise. |
+| `suspended_with_consumed_callbacks` | No suspended task should have any consumed callbacks. |
+| `suspended_task_has_ttimeout` | No suspended task should have any timeout. |
+| `fulfilled_task_has_ttimeout` | No fulfilled task should have any timeout. |
+
+### Callback invariant
+
+| Invariant | Condition |
+|---|---|
+| `callback_awaiter_no_target` | Every callback's awaiter promise must have a `resonate:target` tag. |
+
+## See also
+
+- [Coordination Protocol](/spec/execution-model/coordination-protocol) — the sibling protocol covering partial order.
+- [Message Passing Protocol](/spec/execution-model/message-passing) — the underlying transport layer including the wire envelope and address scheme.
+- [Tasks](/spec/system-model/tasks) — the lifecycle and operations recovery operationalizes.
+- [Processes](/spec/system-model/processes) — the failure model assumed by recovery.

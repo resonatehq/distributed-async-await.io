@@ -1,0 +1,115 @@
+---
+title: Tasks
+description: The unit of work the server delivers to a worker — lifecycle, version-based concurrency, and lease semantics.
+keywords:
+  - task
+  - lifecycle
+  - lease
+  - heartbeat
+  - fence
+  - version
+---
+
+<Callout type="info" title="Unit of delivery">
+A task is the unit of work the server delivers to a worker. Where a [Promise](/spec/programming-model/durable-promise-specification) represents a future value, a task represents the *responsibility for producing that value* — claimed by a worker, kept alive by a lease, and surrendered on crash so a successor can take over.
+</Callout>
+
+A task and its associated promise share an identifier. They are paired but distinct: the promise owns the value; the task owns the claim. Tasks exist only when work needs to be delivered to a worker — that is, when the promise carries a `resonate:target` tag specifying a delivery address.
+
+## Lifecycle
+
+A task moves through five states. The version increments only on the `pending → acquired` transition (`task.acquire`); it is the optimistic concurrency control (OCC) token every mutating operation must present.
+
+```text
+          create (via promise.create with resonate:target)
+            |
+            v
+        [pending] ---(acquire, version++) ---> [acquired] <--- create (via task.create)
+            ^                                      |   ^
+            |          <------(release)-----       (suspend)
+            |                                      |   |
+            |                                      v   |
+            |                                  [suspended]
+            |                                      |
+            +-------------(resume)----------------+
+            |
+            |   [pending] ---(halt)---> [halted]
+            |   [acquired] --(halt)---> [halted]
+            |   [suspended]-(halt)---> [halted]
+            |
+            +<-----------(continue)--- [halted]
+
+        [acquired] ---(fulfill)---> [fulfilled]
+```
+
+| State | Meaning |
+|---|---|
+| `pending` | The task is available to be claimed. The server has enqueued an `execute` message to the `resonate:target` address. |
+| `acquired` | A worker has claimed the task and is making progress. The worker holds a lease that must be refreshed via heartbeat. |
+| `suspended` | The worker has declared it is awaiting one or more other promises. The server holds the task here until any awaited promise settles. |
+| `halted` | Admin-blocked state. A halted task can be returned to `pending` via `task.continue`. |
+| `fulfilled` | Terminal. The associated promise has settled and the task is complete. |
+
+`task.create` creates the task directly in `acquired` state. `promise.create` with a `resonate:target` tag creates the task in `pending` state. The version field increments only on the `pending → acquired` transition (`task.acquire`); it does not change on transitions back to `pending` (release, resume, lease expiry).
+
+All mutating task operations require the caller to present the current version. A version mismatch results in conflict (status 409) — the task has moved on without you, and the operation must be re-fetched and retried.
+
+## Lease and heartbeat
+
+An acquired task carries a **lease**: a deadline by which the worker must signal liveness. The lease is set when the task is acquired and refreshed by every successful heartbeat. If the lease expires, the server releases the task back to `pending` (without incrementing the version), re-enqueues the execute message, and allows a different worker to claim it — at which point `task.acquire` will increment the version.
+
+```text
+acquire      →  set lease = now + leaseTimeout, version++
+heartbeat    →  set lease = now + leaseTimeout
+release      →  delete lease, transition back to pending (version unchanged)
+lease expiry →  transition back to pending (version unchanged), re-enqueue execute
+```
+
+Heartbeat is **process-level, not task-level**. A worker sends one heartbeat for all the acquired tasks it holds; the server refreshes every matching `(id, version)` pair in a single round-trip.
+
+The heartbeat cadence is implementation-defined. A typical worker heartbeats at roughly half the lease interval to absorb transient network delay without losing the lease.
+
+## Operations
+
+The server exposes the following task operations. Each operation takes the task's current `id` and `version` (where applicable) and returns the new state or an error.
+
+| Operation | Purpose |
+|---|---|
+| `task.get` | Retrieve a task by id (read-only). |
+| `task.create` | Create a task and its promise atomically; the task starts in `acquired`. The action must carry a `resonate:target` tag. |
+| `task.acquire` | Transition `pending → acquired`. Only the worker presenting the current version succeeds; concurrent workers see 409. |
+| `task.heartbeat` | Refresh the lease on one or more acquired tasks. Each `(id, version)` pair is processed independently; mismatches are silently skipped. |
+| `task.suspend` | Declare the worker is awaiting one or more promises. The server registers callbacks atomically and transitions the task to `suspended`. If any awaited promise has already settled, the server returns 300 — the worker should resume immediately without suspending. |
+| `task.fulfill` | Settle the task's promise and transition the task to `fulfilled` in one atomic operation. The action's promise id must equal the task id. |
+| `task.fence` | Run a `promise.create` or `promise.settle` guarded by the task's fencing token. The guard checks that the task is `acquired`, the associated promise is `pending` and not timed out, and the presented version matches — any failure returns 409. The `req.action` field selects which promise operation to execute. |
+| `task.release` | Surrender the claim. The task transitions back to `pending` (version unchanged), the server re-enqueues the `execute` message to the `resonate:target` address, and the task becomes available to other workers. The version increments when a successor calls `task.acquire`. |
+| `task.halt` | Administratively block the task from being claimed or resumed. |
+| `task.continue` | Reverse `task.halt`. |
+| `task.search` | Enumerate tasks (filtered by state, target, etc.). |
+
+## Asymmetry with promises
+
+Task operations are **not idempotent** in the way promise operations are. A promise carries idempotency keys (`ikc`, `iku`) that allow safe retry after an unknown-outcome failure (see the [Durable Promise Specification](/spec/programming-model/durable-promise-specification#state-transitions)). A task carries only its version — retrying a successful `task.acquire` with the same version succeeds again at first but fails as soon as the successor's `task.acquire` increments the version.
+
+This asymmetry reflects the role of each: a promise represents *state* whose final value is what matters; a task represents *progress*, where each transition is a decisive moment of claim ownership. The version protects against duplicate progress; idempotency keys protect against duplicate state.
+
+## Invariants
+
+A conformant server must maintain the following invariants over its task store:
+
+- **`orphan_tasks`** — every task must have a corresponding promise.
+- **`pending_task_no_ttimeout`** — every pending task must have a retry timeout.
+- **`acquired_task_no_lease`** — every acquired task must have a lease.
+- **`suspended_no_callback`** — every suspended task must have at least one callback registered on an awaited promise.
+- **`suspended_with_consumed_callbacks`** — no suspended task should have any consumed callbacks.
+- **`suspended_task_has_ttimeout`** — no suspended task should have any timeout.
+- **`fulfilled_task_has_ttimeout`** — no fulfilled task should have any timeout.
+
+Violations indicate a bug in the implementation, not a recoverable runtime condition.
+
+## See also
+
+- [Processes](/spec/system-model/processes) — the failure model that motivates leases.
+- [Recovery Protocol](/spec/execution-model/recovery-protocol) — how tasks operationalize recovery.
+- [Coordination Protocol](/spec/execution-model/coordination-protocol) — how `task.suspend` and the settlement chain coordinate awaiting executions.
+- [Durable Promise Specification](/spec/programming-model/durable-promise-specification) — the state a task ultimately settles.

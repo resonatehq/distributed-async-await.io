@@ -1,0 +1,177 @@
+---
+title: Glossary
+description: Load-bearing terms used throughout the Distributed Async Await specification.
+keywords:
+  - glossary
+  - definitions
+  - distributed-async-await
+---
+
+### Activation
+
+A single physical attempt to run a function. A logical execution may consist of multiple activations across recoveries — each one starts from the beginning, replays past completed steps using recorded results, and attempts to make further progress. Synonym for [Physical Execution](#physical-process). See [Function Executions](/spec/system-model/executions).
+
+### Address
+
+A URI identifying where a message should be delivered. Addresses appear on the `resonate:target` tag of a promise (for execute messages) and on listener registrations (for unblock messages). The address scheme selects the [transport](/spec/execution-model/message-passing#address-schemes) (for example `http://`, `poll://`, `nats://`, `kafka://`).
+
+### Agent
+
+A program that generates and executes code on behalf of a user — including, increasingly, code that calls Distributed Async Await APIs. From the perspective of the protocol, an agent is just another process. See [Process](#process).
+
+### Anycast
+
+A delivery mode in which a message is sent to exactly one worker drawn from a group, with optional preference for a named worker. Contrast with [Unicast](#unicast). See [Message Passing Protocol](/spec/execution-model/message-passing#delivery-semantics).
+
+### Application Node
+
+A process that hosts function executions and communicates with the server to coordinate them. The first execution on an application node is its [Root Promise](/spec/programming-model/#root-promises). [Reference SDKs](https://docs.resonatehq.io/develop) typically expose this as the entry point invoked by a top-level `run` call.
+
+### Async Await
+
+Async Await is a programming model based on functions and promises that allows for concurrent execution of code within a single process.
+
+### Async Call Graph
+
+A [Call Graph](#call-graph) in which the edges represent asynchronous invocations — that is, the caller continues executing concurrently with the callee, and the caller awaits a promise to receive the callee's result.
+
+### Call Graph
+
+A Call Graph is a directed graph where the nodes are functions and the edges are calls between functions.
+
+See also:
+
+- [Async Call Graph](#async-call-graph)
+
+### Callback
+
+A registration on a pending promise that, when the promise settles, enqueues a resume on the awaiter's task. Callbacks are the link between settlement and the [Settlement Chain's](#settlement-chain) resume step. See [Recovery Protocol](/spec/execution-model/recovery-protocol#the-settlement-chain).
+
+### Concurrency
+
+The property of a system in which multiple executions may take a step at the same point in time. Concurrency introduces *partial order* — non-deterministic interleaving of steps across executions. See also [Coordination](#coordination).
+
+### Coordination
+
+The mechanism by which concurrent executions agree on a partial order of operations. In Distributed Async Await, coordination is provided by [Promises](#promise) — a caller and callee execute concurrently, and the caller awaits a promise to receive the callee's result. See also [Concurrency](#concurrency).
+
+### Definition
+
+The static description of a computation — the program text. A definition becomes an [Execution](#execution) when it is invoked. See also [Execution](#execution).
+
+### Distribution
+
+The property of a system in which executions span multiple [Processes](#process), each with its own state and its own potential for [Failure](#interruption). Distribution introduces *partial failure* — non-deterministic termination of a subset of processes. See also [Recovery](#recovery).
+
+### Durable Executions
+
+A Durable Execution is a programming abstraction with an interruption-agnostic definition resulting in an interruption-transparent execution.
+
+### Envelope
+
+The uniform request/response container all protocol messages use: a `kind` (operation identifier), a `head` (correlation id, protocol version, optional auth or status), and a `data` payload (operation-specific). See [Message Passing Protocol](/spec/execution-model/message-passing#wire-envelope).
+
+### Execution
+
+The dynamic instance of a [Definition](#definition) — the running program, with all its in-flight state. An execution has a well-defined lifecycle: *invoke* (entry) and *return* (exit). See also [Definition](#definition).
+
+### Fence
+
+A version-guarded operation that atomically runs either a `promise.create` or a `promise.settle` only if the task is still acquired at the presented version. Used when a worker needs to confirm it is the unique current claimant before externalizing a side effect. See [Tasks](/spec/system-model/tasks#operations).
+
+### Function
+
+A unit of computation defined by its inputs, its outputs, and its body. In Distributed Async Await, functions compose recursively — a function may call other functions, spanning a [Call Graph](#call-graph). Together with [Promises](#promise), functions are one of two universal abstractions on which the programming model is built.
+
+### Heartbeat
+
+A periodic process-level signal a worker sends to extend the [Lease](#lease) on every task it currently holds. The cadence is implementation-defined; workers typically heartbeat at roughly half the lease interval. See [Recovery Protocol](/spec/execution-model/recovery-protocol#lease-and-heartbeat).
+
+### Idempotency Key
+
+An optional opaque value attached to a [Promise](#promise) operation that allows the server to deduplicate a retry from an unknown-outcome request. Two keys are tracked per promise: `ikc` (idempotency key for create) and `iku` (idempotency key for update). See the [Durable Promise Specification](/spec/programming-model/durable-promise-specification#state-transitions) state-transition table.
+
+### Interruption
+
+The term _interruption_ refers to a voluntary (system-triggered) or involuntary (environment-triggered) termination mid execution.
+
+### Interruption-agnostic
+
+A property of a [Definition](#definition): the definition (program, code) does not contain interruption detection or interruption mitigation logic. The author writes ordinary, synchronous-looking code; the protocol takes responsibility for handling interruptions transparently.
+
+### Interruption-tolerant
+
+A property of an [Execution](#execution): an execution that experiences an interruption and subsequently recovers is equivalent to some execution that does not experience an interruption. Formally, `(⟨p⟩, →(+interruption)) ≃ (⟨p⟩, →(-interruption))`. See the [Durable Function Specification](/spec/programming-model/durable-function-specification) for the formal treatment.
+
+### Lease
+
+A deadline by which a [Worker](#worker) must signal liveness on an acquired [Task](#task). Each successful [Heartbeat](#heartbeat) extends the lease. If the lease expires, the server releases the task back to `pending` (version unchanged) and re-enqueues the execute message; a successor worker's `task.acquire` will then increment the [Version](#version). See [Recovery Protocol](/spec/execution-model/recovery-protocol#lease-and-heartbeat).
+
+### Listener
+
+An external address registered to receive an *unblock* message when a [Promise](#promise) settles. Distinct from a [Callback](#callback): a listener is consumed by external delivery, a callback is consumed by internal resume. See [Message Passing Protocol](/spec/execution-model/message-passing).
+
+### Logical Process
+
+A [Process](#process) identified by its logical identity — what the system reasons *about*. One logical process is realized by one or more [Physical Processes](#physical-process) over time; when a physical process crashes, the logical process suspends, and a successor physical process resumes it.
+
+### Messages
+
+Messages are the means by which processes communicate with each other.
+
+### Physical Process
+
+A concrete OS-level process that runs on a specific machine for a finite lifetime. A physical process realizes a [Logical Process](#logical-process); a single logical process may be realized by a sequence of physical processes across crashes and restarts.
+
+### Process
+
+Processes are the **fundamental unit of locality** in a system, each with a unique identity and a well-defined lifecycle.
+
+See also:
+
+- [Logical Process](#logical-process)
+- [Physical Process](#physical-process)
+
+### Process Group
+
+A logical group name that workers register under. Used by the [Anycast](#anycast) and [Unicast](#unicast) addressing modes to identify the recipient set for a message. See [Message Passing Protocol](/spec/execution-model/message-passing#poll-address).
+
+### Programming Model
+
+The developer-facing surface of a system: the abstractions that authors compose to express computation. Distributed Async Await's programming model is built on [Functions](#function) and [Promises](#promise) — the same primitives as ordinary async/await, lifted to span [Distribution](#distribution).
+
+### Promise
+
+A representation of a future value. A promise is either *pending* or *completed*; a completed promise is *resolved* (success), *rejected* (failure), *rejectedCanceled* (canceled), or *rejectedTimedout* (timed out). Promises are the universal abstraction for [Coordination](#coordination) — a caller awaits a promise to receive a callee's result. In Distributed Async Await, promises are *durable*: they persist independently of the processes that reference them. See the [Durable Promise Specification](/spec/programming-model/durable-promise-specification) for the formal API and state-transition table.
+
+### Recovery
+
+The mechanism by which a [Logical Process](#logical-process) survives the [Failure](#interruption) of a [Physical Process](#physical-process). Recovery is the response to *partial failure*, just as [Coordination](#coordination) is the response to *partial order*. See the [Recovery Protocol](/spec/execution-model/recovery-protocol) for details.
+
+### Reserved Tag
+
+A tag in the `resonate:` namespace whose meaning is defined by the protocol — for example `resonate:target` (delivery address), `resonate:timer` (timeout-as-resolved), `resonate:origin` (root promise of an execution tree). See [Message Passing Protocol](/spec/execution-model/message-passing#reserved-tags).
+
+### Server
+
+The component that owns durable promise and task state, runs the [Settlement Chain](#settlement-chain), enforces protocol [Invariants](/spec/execution-model/recovery-protocol#server-invariants), and routes messages between [Workers](#worker). Reference implementation: the open-source [Resonate Server](https://github.com/resonatehq/resonate).
+
+### Settlement Chain
+
+The linear sequence of effects triggered by every promise settlement: *settle* → *resume* → *execute*. Settling a promise in one composite may cause resumes on awaiter tasks, which may cause execute messages to other workers — but the chain is linear, not recursive. See [Recovery Protocol](/spec/execution-model/recovery-protocol#the-settlement-chain).
+
+### Task
+
+The unit of work the server delivers to a worker. A task and its associated promise share an identifier; the promise owns the *value*, the task owns the *claim*. Tasks have a lifecycle (`pending`/`acquired`/`suspended`/`halted`/`fulfilled`), a [Version](#version), and a [Lease](#lease). See [Tasks](/spec/system-model/tasks).
+
+### Unicast
+
+A delivery mode in which a message is sent to exactly one specific worker by id. If that worker is not available, delivery fails and the message remains in the outbox for retry. Contrast with [Anycast](#anycast). See [Message Passing Protocol](/spec/execution-model/message-passing#delivery-semantics).
+
+### Version
+
+The optimistic concurrency control (OCC) token on a [Task](#task). The version increments only on the `pending → acquired` transition (`task.acquire`); transitions back to `pending` (release, resume, lease expiry) do not change the version. All mutating task operations must present the current version; a mismatch returns `409 Conflict`. See [Tasks](/spec/system-model/tasks#lifecycle).
+
+### Worker
+
+A process that claims [Tasks](#task) from the [Server](#server), executes the associated function, and reports liveness via [Heartbeat](#heartbeat). A worker can host multiple acquired tasks at once. Reference SDKs ([TypeScript](https://docs.resonatehq.io/develop/typescript), [Python](https://docs.resonatehq.io/develop/python), [Rust](https://docs.resonatehq.io/develop/rust)) embed worker logic alongside the application code.

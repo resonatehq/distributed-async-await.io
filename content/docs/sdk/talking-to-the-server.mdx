@@ -39,7 +39,7 @@ Put the transport behind an interface on day one, even if you only ever implemen
 
 ## The request envelope
 
-Every request the SDK sends is the uniform envelope from [the message-passing spec](https://docs.resonatehq.io/spec/execution-model/message-passing) — a `kind`, a `head`, and operation-specific `data`:
+Every request the SDK sends is the uniform envelope from [the message-passing spec](/spec/execution-model/message-passing) — a `kind`, a `head`, and operation-specific `data`:
 
 ```ts
 {
@@ -58,7 +58,7 @@ The response comes back with the same `kind` and `corrId`, plus a `status` in it
 
 ## The poll transport: receiving work over SSE
 
-HTTP send is the easy half — POST the envelope, await the response. The interesting half is receive, and the protocol's portable answer is the **poll transport**: the worker holds open a long-lived HTTP `GET` to the server, and the server streams messages down it as [Server-Sent Events](https://docs.resonatehq.io/spec/execution-model/message-passing#poll-address). The worker never exposes a port; it makes an outbound connection and listens.
+HTTP send is the easy half — POST the envelope, await the response. The interesting half is receive, and the protocol's portable answer is the **poll transport**: the worker holds open a long-lived HTTP `GET` to the server, and the server streams messages down it as [Server-Sent Events](/spec/execution-model/message-passing#poll-address). The worker never exposes a port; it makes an outbound connection and listens.
 
 Each message arrives as an SSE frame — a line `data: {json}` terminated by a blank line. The receive loop's whole job is: hold the connection, read frames, parse each `data:` payload as a message, and hand it to the registered callback. In TypeScript, `PollMessageSource` (`resonate-sdk-ts/src/network/http.ts`) wraps the standard `EventSource` and fans each parsed frame out to the `recv` callbacks. In Rust, `HttpNetwork` (`resonate-sdk-rs/resonate/src/http_network.rs`) spawns a task that reads the response byte-stream and scans it for `data:`-prefixed lines, because there is no built-in `EventSource` to lean on.
 
