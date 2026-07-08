@@ -25,7 +25,7 @@ structure ServerState where
   outbox           : List OutboxEntry
 ```
 
-That's it. Every object the server knows about lives in one of those eight fields. There is no connection pool, no clock, no filesystem reference. `ServerState` is a plain inductive value; two states are equal iff their fields are equal. This makes the spec executable as a pure function and mechanically comparable against any implementation you build.
+Those eight fields are the entire server state — every object the server knows about lives in one of them. There is no connection pool, no clock, no filesystem reference. `ServerState` is a plain inductive value; two states are equal iff their fields are equal. This makes the spec executable as a pure function and mechanically comparable against any implementation you build.
 
 `ServerConfig` carries one field today: `retryTimeout : Nat := 5000` (milliseconds). Everything else — auth, transport, indexes — is outside the machine.
 
