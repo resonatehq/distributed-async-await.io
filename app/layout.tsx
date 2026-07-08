@@ -4,6 +4,7 @@ import localFont from "next/font/local";
 import Navigation from "@/components/Navigation";
 import Footer from "@/components/Footer";
 import ConsentManager from "@/components/ConsentManager";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
 const inter = Inter({
@@ -30,8 +31,10 @@ const sansation = localFont({
   display: "swap",
 });
 
+const SITE_URL = "https://www.distributed-async-await.io";
+
 export const metadata: Metadata = {
-  metadataBase: new URL("https://distributed-async-await.io"),
+  metadataBase: new URL(SITE_URL),
   title: {
     template: "%s — Distributed Async Await",
     default: "Distributed Async Await — the SDK author's handbook",
@@ -49,17 +52,26 @@ export const metadata: Metadata = {
   openGraph: {
     title: "Distributed Async Await — the SDK author's handbook",
     description: "How to build a Resonate SDK in any language, from first principles to production.",
-    url: "https://distributed-async-await.io",
+    url: SITE_URL,
     siteName: "Distributed Async Await",
     type: "website",
+    images: [
+      {
+        url: "/images/og-default.png",
+        width: 2400,
+        height: 1260,
+        alt: "Distributed Async Await — the SDK author's handbook",
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
     title: "Distributed Async Await — the SDK author's handbook",
     description: "How to build a Resonate SDK in any language, from first principles to production.",
+    images: ["/images/og-default.png"],
   },
   alternates: {
-    canonical: "https://distributed-async-await.io",
+    canonical: SITE_URL,
   },
 };
 
@@ -83,6 +95,34 @@ export default function RootLayout({
             __html: `window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('consent','default',{ad_storage:'denied',ad_user_data:'denied',ad_personalization:'denied',analytics_storage:'denied',functionality_storage:'granted',security_storage:'granted',wait_for_update:2000});`,
           }}
         />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              "@context": "https://schema.org",
+              "@graph": [
+                {
+                  "@type": "WebSite",
+                  "@id": `${SITE_URL}/#website`,
+                  url: SITE_URL,
+                  name: "Distributed Async Await",
+                  description:
+                    "How to build a Resonate SDK. A handbook for developers implementing the Distributed Async Await protocol in any language — from the protocol mental model to production concerns.",
+                },
+                {
+                  "@type": "Organization",
+                  "@id": "https://resonatehq.io/#organization",
+                  name: "ResonateHQ",
+                  url: "https://resonatehq.io",
+                  sameAs: [
+                    "https://twitter.com/resonatehqio",
+                    "https://github.com/resonatehq",
+                  ],
+                },
+              ],
+            }),
+          }}
+        />
       </head>
       <body className="bg-surface-light dark:bg-dark min-h-screen font-serif">
         <Navigation />
@@ -91,6 +131,7 @@ export default function RootLayout({
         </div>
         <Footer />
         <ConsentManager />
+        <Analytics />
       </body>
     </html>
   );

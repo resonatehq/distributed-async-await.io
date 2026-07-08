@@ -109,8 +109,26 @@ export default async function Page({ params }: PageProps) {
   });
 
   const MDX = page.data.body;
+  const pageTitle = page.data.pageTitle ?? page.data.title;
+  const pageDescription =
+    page.data.description || `${pageTitle} — Distributed Async Await`;
 
   return (
+    <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "TechArticle",
+            headline: pageTitle,
+            description: pageDescription,
+            url: `${SITE_URL}${page.url}`,
+            isPartOf: { "@id": `${SITE_URL}/#website` },
+            publisher: { "@id": "https://resonatehq.io/#organization" },
+          }),
+        }}
+      />
     <div className="flex">
       <Sidebar tree={tree} currentPath={page.url} />
 
@@ -195,12 +213,15 @@ export default async function Page({ params }: PageProps) {
 
       <TableOfContents toc={page.data.toc} />
     </div>
+    </>
   );
 }
 
 export function generateStaticParams() {
   return source.generateParams();
 }
+
+const SITE_URL = "https://www.distributed-async-await.io";
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { slug } = await params;
@@ -211,13 +232,19 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const description =
     page.data.description || `${title} — Distributed Async Await`;
 
+  // Root page: bypass the layout title template to prevent "X — X" duplication.
+  const isRoot = !slug || slug.length === 0;
+  const titleField = isRoot
+    ? { absolute: "Distributed Async Await — the SDK author's handbook" }
+    : title;
+
   return {
-    title,
+    title: titleField,
     description,
     openGraph: {
       title: `${title} — Distributed Async Await`,
       description,
-      url: `https://distributed-async-await.io${page.url}`,
+      url: `${SITE_URL}${page.url}`,
       type: "article",
     },
     twitter: {
@@ -226,7 +253,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       description,
     },
     alternates: {
-      canonical: `https://distributed-async-await.io${page.url}`,
+      canonical: `${SITE_URL}${page.url}`,
     },
   };
 }
