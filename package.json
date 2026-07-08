@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@shikijs/rehype": "^3.0.0",
+    "@vercel/analytics": "^2.0.1",
     "fumadocs-core": "15.7.13",
     "fumadocs-mdx": "11.10.1",
     "lucide-react": "^0.500.0",
