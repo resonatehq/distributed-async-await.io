@@ -73,7 +73,7 @@ A call graph can illustrate locality — that is, an execution can display its l
 A call graph is zoomable — it can show the full set of promises and executions, or it can show just the root executions. Consider the following pseudo-code, where `foo()` and `bar()` are in process a, and `baz()` is in process b.
 
 <Callout type="info" title="Spec pseudo-code, not API">
-The notation `async_local` / `async_remote` (and `async_r` used elsewhere in this specification) is **pseudo-code chosen for the spec**. It is not the surface API of any implementation. Reference implementations expose the same semantics through their own idioms — for example, `yield* ctx.run(fn)` for local invocation and `yield* ctx.beginRpc(fn, args)` for remote invocation in the TypeScript SDK. See the [TypeScript](https://docs.resonatehq.io/develop/typescript), [Python](https://docs.resonatehq.io/develop/python), and [Rust](https://docs.resonatehq.io/develop/rust) SDKs for the per-language mapping.
+The notation `async_local` / `async_remote` (and `async_r` used elsewhere in this specification) is **pseudo-code chosen for the spec**. It is not the surface API of any implementation. Reference implementations expose the same semantics through their own idioms — for example, `yield* ctx.run(fn)` for local invocation and `yield* ctx.beginRpc(fn, args)` for remote invocation in the TypeScript SDK. See the [TypeScript](https://docs.resonatehq.io/develop/typescript), [Python](https://docs.resonatehq.io/develop/python), [Rust](https://docs.resonatehq.io/develop/rust), [Go](https://docs.resonatehq.io/develop/go), and [Java](https://docs.resonatehq.io/develop/java) SDKs for the per-language mapping.
 </Callout>
 
 process a:
